@@ -1761,6 +1761,8 @@ struct sqlite3 {
 #define SQLITE_SeekScan       0x00020000 /* The OP_SeekScan optimization */
 #define SQLITE_OmitOrderBy    0x00040000 /* Omit pointless ORDER BY */
    /* TH3 expects this value  ^^^^^^^^^^ to be 0x40000. Coordinate any change */
+#define SQLITE_BloomFilter    0x00080000 /* Use a Bloom filter on searches */
+#define SQLITE_BloomPulldown  0x00100000 /* Run Bloom filters early */
 #define SQLITE_AllOpts        0xffffffff /* All optimizations */
 
 /*
@@ -4682,6 +4684,7 @@ Select *sqlite3SelectDup(sqlite3*,const Select*,int);
 FuncDef *sqlite3FunctionSearch(int,const char*);
 void sqlite3InsertBuiltinFuncs(FuncDef*,int);
 FuncDef *sqlite3FindFunction(sqlite3*,const char*,int,u8,u8);
+void sqlite3QuoteValue(StrAccum*,sqlite3_value*);
 void sqlite3RegisterBuiltinFunctions(void);
 void sqlite3RegisterDateTimeFunctions(void);
 void sqlite3RegisterPerConnectionBuiltinFunctions(sqlite3*);
@@ -4774,14 +4777,8 @@ int sqlite3Utf8CharLen(const char *pData, int nByte);
 u32 sqlite3Utf8Read(const u8**);
 LogEst sqlite3LogEst(u64);
 LogEst sqlite3LogEstAdd(LogEst,LogEst);
-#ifndef SQLITE_OMIT_VIRTUALTABLE
 LogEst sqlite3LogEstFromDouble(double);
-#endif
-#if defined(SQLITE_ENABLE_STMT_SCANSTATUS) || \
-    defined(SQLITE_ENABLE_STAT4) || \
-    defined(SQLITE_EXPLAIN_ESTIMATED_ROWS)
 u64 sqlite3LogEstToInt(LogEst);
-#endif
 VList *sqlite3VListAdd(sqlite3*,VList*,const char*,int,int);
 const char *sqlite3VListNumToName(VList*,int);
 int sqlite3VListNameToNum(VList*,const char*,int);
@@ -4974,6 +4971,7 @@ int sqlite3ApiExit(sqlite3 *db, int);
 int sqlite3OpenTempDatabase(Parse *);
 
 void sqlite3StrAccumInit(StrAccum*, sqlite3*, char*, int, int);
+int sqlite3StrAccumEnlarge(StrAccum*, int);
 char *sqlite3StrAccumFinish(StrAccum*);
 void sqlite3StrAccumSetError(StrAccum*, u8);
 void sqlite3ResultStrAccum(sqlite3_context*,StrAccum*);
