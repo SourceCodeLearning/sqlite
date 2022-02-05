@@ -422,7 +422,7 @@ static int isAuxiliaryVtabOperator(
       assert( pVtab!=0 );
       assert( pVtab->pModule!=0 );
       assert( !ExprHasProperty(pExpr, EP_IntValue) );
-       pMod = (sqlite3_module *)pVtab->pModule;
+      pMod = (sqlite3_module *)pVtab->pModule;
       if( pMod->xFindFunction!=0 ){
         i = pMod->xFindFunction(pVtab,2, pExpr->u.zToken, &xNotUsed, &pNotUsed);
         if( i>=SQLITE_INDEX_CONSTRAINT_FUNCTION ){
@@ -1399,7 +1399,7 @@ static void exprAnalyze(
 
       pNew = sqlite3PExpr(pParse, pExpr->op, pLeft, pRight);
       transferJoinMarkings(pNew, pExpr);
-      idxNew = whereClauseInsert(pWC, pNew, TERM_DYNAMIC);
+      idxNew = whereClauseInsert(pWC, pNew, TERM_DYNAMIC|TERM_SLICE);
       exprAnalyze(pSrc, pWC, idxNew);
     }
     pTerm = &pWC->a[idxTerm];
@@ -1616,7 +1616,7 @@ void sqlite3WhereAddLimit(WhereClause *pWC, Select *p){
       for(ii=0; ii<pOrderBy->nExpr; ii++){
         Expr *pExpr = pOrderBy->a[ii].pExpr;
         if( pExpr->op!=TK_COLUMN ) return;
-        if( NEVER(pExpr->iTable!=iCsr) ) return;
+        if( pExpr->iTable!=iCsr ) return;
         if( pOrderBy->a[ii].sortFlags & KEYINFO_ORDER_BIGNULL ) return;
       }
     }
