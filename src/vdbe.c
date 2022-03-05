@@ -991,10 +991,14 @@ jump_to_p2:
   break;
 }
 
-/* Opcode:  Return P1 * * * *
+/* Opcode:  Return P1 * P3 * *
 **
 ** Jump to the next instruction after the address in register P1.  After
 ** the jump, register P1 becomes undefined.
+**
+** P3 is not used by the byte-code engine.  However, the code generator
+** sets P3 to address of the associated OP_BeginSubrtn opcode, if there is
+** one.
 */
 case OP_Return: {           /* in1 */
   pIn1 = &aMem[pOp->p1];
@@ -1182,11 +1186,22 @@ case OP_Halt: {
   goto vdbe_return;
 }
 
+/* Opcode: BeginSubrtn P1 P2 * * *
+** Synopsis: r[P2]=P1
+**
+** Mark the beginning of a subroutine by loading the integer value P1
+** into register r[P2].  The P2 register is used to store the return
+** address of the subroutine call.
+**
+** This opcode is identical to OP_Integer.  It has a different name
+** only to make the byte code easier to read and verify.
+*/
 /* Opcode: Integer P1 P2 * * *
 ** Synopsis: r[P2]=P1
 **
 ** The 32-bit integer value P1 is written into register P2.
 */
+case OP_BeginSubrtn:
 case OP_Integer: {         /* out2 */
   pOut = out2Prerelease(p, pOp);
   pOut->u.i = pOp->p1;
@@ -2727,14 +2742,10 @@ op_column_restart:
       pC->aRow = sqlite3BtreePayloadFetch(pCrsr, &pC->szRow);
       assert( pC->szRow<=pC->payloadSize );
       assert( pC->szRow<=65536 );  /* Maximum page size is 64KiB */
-      if( pC->payloadSize > (u32)db->aLimit[SQLITE_LIMIT_LENGTH] ){
-        goto too_big;
-      }
     }
     pC->cacheStatus = p->cacheCtr;
     pC->iHdrOffset = getVarint32(pC->aRow, aOffset[0]);
     pC->nHdrParsed = 0;
-
 
     if( pC->szRow<aOffset[0] ){      /*OPTIMIZATION-IF-FALSE*/
       /* pC->aRow does not have to hold the entire row, but it does at least
@@ -2888,6 +2899,7 @@ op_column_restart:
       pDest->n = len = (t-12)/2;
       pDest->enc = encoding;
       if( pDest->szMalloc < len+2 ){
+        if( len>db->aLimit[SQLITE_LIMIT_LENGTH] ) goto too_big;
         pDest->flags = MEM_Null;
         if( sqlite3VdbeMemGrow(pDest, len+2, 0) ) goto no_mem;
       }else{
@@ -2920,6 +2932,7 @@ op_column_restart:
       */
       sqlite3VdbeSerialGet((u8*)sqlite3CtypeMap, t, pDest);
     }else{
+      if( len>db->aLimit[SQLITE_LIMIT_LENGTH] ) goto too_big;
       rc = sqlite3VdbeMemFromBtree(pC->uc.pCursor, aOffset[p2], len, pDest);
       if( rc!=SQLITE_OK ) goto abort_due_to_error;
       sqlite3VdbeSerialGet((const u8*)pDest->z, t, pDest);
@@ -3132,7 +3145,6 @@ case OP_MakeRecord: {
   Mem *pLast;            /* Last field of the record */
   int nField;            /* Number of fields in the record */
   char *zAffinity;       /* The affinity string for the record */
-  int file_format;       /* File format to use for encoding */
   u32 len;               /* Length of a field */
   u8 *zHdr;              /* Where to write next byte of the header */
   u8 *zPayload;          /* Where to write next byte of the payload */
@@ -3161,7 +3173,6 @@ case OP_MakeRecord: {
   pData0 = &aMem[nField];
   nField = pOp->p2;
   pLast = &pData0[nField-1];
-  file_format = p->minWriteFileFormat;
 
   /* Identify the output register */
   assert( pOp->p3<pOp->p1 || pOp->p3>=pOp->p1+pOp->p2 );
@@ -3263,7 +3274,7 @@ case OP_MakeRecord: {
       testcase( uu==2147483647 );        testcase( uu==2147483648LL );
       testcase( uu==140737488355327LL ); testcase( uu==140737488355328LL );
       if( uu<=127 ){
-        if( (i&1)==i && file_format>=4 ){
+        if( (i&1)==i && p->minWriteFileFormat>=4 ){
           pRec->uTemp = 8+(u32)uu;
         }else{
           nData++;
@@ -6349,7 +6360,7 @@ case OP_IdxGE:  {       /* jump */
     rc = sqlite3VdbeMemFromBtreeZeroOffset(pCur, (u32)nCellKey, &m);
     if( rc ) goto abort_due_to_error;
     res = sqlite3VdbeRecordCompareWithSkip(m.n, m.z, &r, 0);
-    sqlite3VdbeMemRelease(&m);
+    sqlite3VdbeMemReleaseMalloc(&m);
   }
   /* End of inlined sqlite3VdbeIdxKeyCompare() */
 

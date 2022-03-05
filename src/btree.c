@@ -1457,7 +1457,7 @@ static u16 cellSize(MemPage *pPage, int iCell){
 #ifndef SQLITE_OMIT_AUTOVACUUM
 /*
 ** The cell pCell is currently part of page pSrc but will ultimately be part
-** of pPage.  (pSrc and pPager are often the same.)  If pCell contains a
+** of pPage.  (pSrc and pPage are often the same.)  If pCell contains a
 ** pointer to an overflow page, insert an entry into the pointer-map for
 ** the overflow page that will be valid after pCell has been moved to pPage.
 */
@@ -1914,7 +1914,6 @@ static int decodeFlags(MemPage *pPage, int flagByte){
   pPage->leaf = (u8)(flagByte>>3);  assert( PTF_LEAF == 1<<3 );
   flagByte &= ~PTF_LEAF;
   pPage->childPtrSize = 4-4*pPage->leaf;
-  pPage->xCellSize = cellSizePtr;
   pBt = pPage->pBt;
   if( flagByte==(PTF_LEAFDATA | PTF_INTKEY) ){
     /* EVIDENCE-OF: R-07291-35328 A value of 5 (0x05) means the page is an
@@ -1944,12 +1943,17 @@ static int decodeFlags(MemPage *pPage, int flagByte){
     assert( (PTF_ZERODATA|PTF_LEAF)==10 );
     pPage->intKey = 0;
     pPage->intKeyLeaf = 0;
+    pPage->xCellSize = cellSizePtr;
     pPage->xParseCell = btreeParseCellPtrIndex;
     pPage->maxLocal = pBt->maxLocal;
     pPage->minLocal = pBt->minLocal;
   }else{
     /* EVIDENCE-OF: R-47608-56469 Any other value for the b-tree page type is
     ** an error. */
+    pPage->intKey = 0;
+    pPage->intKeyLeaf = 0;
+    pPage->xCellSize = cellSizePtr;
+    pPage->xParseCell = btreeParseCellPtrIndex;
     return SQLITE_CORRUPT_PAGE(pPage);
   }
   pPage->max1bytePayload = pBt->max1bytePayload;
@@ -2107,7 +2111,7 @@ static int btreeInitPage(MemPage *pPage){
   pPage->nOverflow = 0;
   pPage->cellOffset = pPage->hdrOffset + 8 + pPage->childPtrSize;
   pPage->aCellIdx = data + pPage->childPtrSize + 8;
-  pPage->aDataEnd = pPage->aData + pBt->usableSize;
+  pPage->aDataEnd = pPage->aData + pBt->pageSize;
   pPage->aDataOfst = pPage->aData + pPage->childPtrSize;
   /* EVIDENCE-OF: R-37002-32774 The two-byte integer at offset 3 gives the
   ** number of cells on the page. */
@@ -2142,7 +2146,7 @@ static void zeroPage(MemPage *pPage, int flags){
   u8 hdr = pPage->hdrOffset;
   u16 first;
 
-  assert( sqlite3PagerPagenumber(pPage->pDbPage)==pPage->pgno );
+  assert( sqlite3PagerPagenumber(pPage->pDbPage)==pPage->pgno || CORRUPT_DB );
   assert( sqlite3PagerGetExtra(pPage->pDbPage) == (void*)pPage );
   assert( sqlite3PagerGetData(pPage->pDbPage) == data );
   assert( sqlite3PagerIswriteable(pPage->pDbPage) );
@@ -2158,7 +2162,7 @@ static void zeroPage(MemPage *pPage, int flags){
   pPage->nFree = (u16)(pBt->usableSize - first);
   decodeFlags(pPage, flags);
   pPage->cellOffset = first;
-  pPage->aDataEnd = &data[pBt->usableSize];
+  pPage->aDataEnd = &data[pBt->pageSize];
   pPage->aCellIdx = &data[first];
   pPage->aDataOfst = &data[pPage->childPtrSize];
   pPage->nOverflow = 0;
@@ -2284,7 +2288,7 @@ static int getAndInitPage(
       goto getAndInitPage_error2;
     }
   }
-  assert( (*ppPage)->pgno==pgno );
+  assert( (*ppPage)->pgno==pgno || CORRUPT_DB );
   assert( (*ppPage)->aData==sqlite3PagerGetData(pDbPage) );
 
   /* If obtaining a child page for a cursor, we must verify that the page is
@@ -9041,7 +9045,7 @@ int sqlite3BtreeInsert(
   assert( pPage->intKey || pX->nKey>=0 || (flags & BTREE_PREFORMAT) );
   assert( pPage->leaf || !pPage->intKey );
   if( pPage->nFree<0 ){
-    if( NEVER(pCur->eState>CURSOR_INVALID) ){
+    if( pCur->eState>CURSOR_INVALID ){
       rc = SQLITE_CORRUPT_BKPT;
     }else{
       rc = btreeComputeFreeSpace(pPage);
