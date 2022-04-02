@@ -266,12 +266,12 @@ static VdbeCursor *allocateCursor(
   int nByte;
   VdbeCursor *pCx = 0;
   nByte = 
-      ROUND8(sizeof(VdbeCursor)) + 2*sizeof(u32)*nField + 
+      ROUND8P(sizeof(VdbeCursor)) + 2*sizeof(u32)*nField + 
       (eCurType==CURTYPE_BTREE?sqlite3BtreeCursorSize():0);
 
   assert( iCur>=0 && iCur<p->nCursor );
   if( p->apCsr[iCur] ){ /*OPTIMIZATION-IF-FALSE*/
-    sqlite3VdbeFreeCursor(p, p->apCsr[iCur]);
+    sqlite3VdbeFreeCursorNN(p, p->apCsr[iCur]);
     p->apCsr[iCur] = 0;
   }
 
@@ -301,7 +301,7 @@ static VdbeCursor *allocateCursor(
   pCx->aOffset = &pCx->aType[nField];
   if( eCurType==CURTYPE_BTREE ){
     pCx->uc.pCursor = (BtCursor*)
-        &pMem->z[ROUND8(sizeof(VdbeCursor))+2*sizeof(u32)*nField];
+        &pMem->z[ROUND8P(sizeof(VdbeCursor))+2*sizeof(u32)*nField];
     sqlite3BtreeCursorZero(pCx->uc.pCursor);
   }
   return pCx;
@@ -740,7 +740,7 @@ int sqlite3VdbeExec(
 #endif
   /*** INSERT STACK UNION HERE ***/
 
-  assert( p->iVdbeMagic==VDBE_MAGIC_RUN );  /* sqlite3_step() verifies this */
+  assert( p->eVdbeState==VDBE_RUN_STATE );  /* sqlite3_step() verifies this */
   sqlite3VdbeEnter(p);
 #ifndef SQLITE_OMIT_PROGRESS_CALLBACK
   if( db->xProgress ){
@@ -1549,45 +1549,32 @@ case OP_FkCheck: {
 ** the result row.
 */
 case OP_ResultRow: {
-  Mem *pMem;
-  int i;
   assert( p->nResColumn==pOp->p2 );
   assert( pOp->p1>0 || CORRUPT_DB );
   assert( pOp->p1+pOp->p2<=(p->nMem+1 - p->nCursor)+1 );
 
-  /* Invalidate all ephemeral cursor row caches */
   p->cacheCtr = (p->cacheCtr + 2)|1;
-
-  /* Make sure the results of the current row are \000 terminated
-  ** and have an assigned type.  The results are de-ephemeralized as
-  ** a side effect.
-  */
-  pMem = p->pResultSet = &aMem[pOp->p1];
-  for(i=0; i<pOp->p2; i++){
-    assert( memIsValid(&pMem[i]) );
-    Deephemeralize(&pMem[i]);
-    assert( (pMem[i].flags & MEM_Ephem)==0
-            || (pMem[i].flags & (MEM_Str|MEM_Blob))==0 );
-    sqlite3VdbeMemNulTerminate(&pMem[i]);
-    REGISTER_TRACE(pOp->p1+i, &pMem[i]);
+  p->pResultSet = &aMem[pOp->p1];
 #ifdef SQLITE_DEBUG
-    /* The registers in the result will not be used again when the
-    ** prepared statement restarts.  This is because sqlite3_column()
-    ** APIs might have caused type conversions of made other changes to
-    ** the register values.  Therefore, we can go ahead and break any
-    ** OP_SCopy dependencies. */
-    pMem[i].pScopyFrom = 0;
-#endif
+  {
+    Mem *pMem = p->pResultSet;
+    int i;
+    for(i=0; i<pOp->p2; i++){
+      assert( memIsValid(&pMem[i]) );
+      REGISTER_TRACE(pOp->p1+i, &pMem[i]);
+      /* The registers in the result will not be used again when the
+      ** prepared statement restarts.  This is because sqlite3_column()
+      ** APIs might have caused type conversions of made other changes to
+      ** the register values.  Therefore, we can go ahead and break any
+      ** OP_SCopy dependencies. */
+      pMem[i].pScopyFrom = 0;
+    }
   }
+#endif
   if( db->mallocFailed ) goto no_mem;
-
   if( db->mTrace & SQLITE_TRACE_ROW ){
     db->trace.xV2(SQLITE_TRACE_ROW, db->pTraceArg, p, 0);
   }
-
-
-  /* Return SQLITE_ROW
-  */
   p->pc = (int)(pOp - aOp) + 1;
   rc = SQLITE_ROW;
   goto vdbe_return;
@@ -3387,18 +3374,28 @@ case OP_MakeRecord: {
   zPayload = zHdr + nHdr;
 
   /* Write the record */
-  zHdr += putVarint32(zHdr, nHdr);
+  if( nHdr<0x80 ){
+    *(zHdr++) = nHdr;
+  }else{
+    zHdr += sqlite3PutVarint(zHdr,nHdr);
+  }
   assert( pData0<=pLast );
   pRec = pData0;
-  do{
+  while( 1 /*exit-by-break*/ ){
     serial_type = pRec->uTemp;
     /* EVIDENCE-OF: R-06529-47362 Following the size varint are one or more
     ** additional varints, one per column. */
-    zHdr += putVarint32(zHdr, serial_type);            /* serial type */
+    if( serial_type<0x80 ){
+      *(zHdr++) = serial_type;
+    }else{
+      zHdr += sqlite3PutVarint(zHdr, serial_type);
+    }
     /* EVIDENCE-OF: R-64536-51728 The values for each column in the record
     ** immediately follow the header. */
     zPayload += sqlite3VdbeSerialPut(zPayload, pRec, serial_type); /* content */
-  }while( (++pRec)<=pLast );
+    if( pRec==pLast ) break;
+    pRec++;
+  }
   assert( nHdr==(int)(zHdr - (u8*)pOut->z) );
   assert( nByte==(int)(zPayload - (u8*)pOut->z) );
 
@@ -7249,6 +7246,7 @@ case OP_AggStep: {
   pCtx->pVdbe = p;
   pCtx->skipFlag = 0;
   pCtx->isError = 0;
+  pCtx->enc = encoding;
   pCtx->argc = n;
   pOp->p4type = P4_FUNCCTX;
   pOp->p4.pCtx = pCtx;
@@ -7378,9 +7376,6 @@ case OP_AggFinal: {
   }
   sqlite3VdbeChangeEncoding(pMem, encoding);
   UPDATE_MAX_BLOBSIZE(pMem);
-  if( sqlite3VdbeMemTooBig(pMem) ){
-    goto too_big;
-  }
   break;
 }
 
@@ -7901,6 +7896,7 @@ case OP_VColumn: {
   assert( pModule->xColumn );
   memset(&sContext, 0, sizeof(sContext));
   sContext.pOut = pDest;
+  sContext.enc = encoding;
   assert( pOp->p5==OPFLAG_NOCHNG || pOp->p5==0 );
   if( pOp->p5 & OPFLAG_NOCHNG ){
     sqlite3VdbeMemSetNull(pDest);
@@ -7919,9 +7915,6 @@ case OP_VColumn: {
   REGISTER_TRACE(pOp->p3, pDest);
   UPDATE_MAX_BLOBSIZE(pDest);
 
-  if( sqlite3VdbeMemTooBig(pDest) ){
-    goto too_big;
-  }
   if( rc ) goto abort_due_to_error;
   break;
 }
@@ -8188,6 +8181,7 @@ case OP_Function: {            /* group */
   if( pCtx->pOut != pOut ){
     pCtx->pVdbe = p;
     pCtx->pOut = pOut;
+    pCtx->enc = encoding;
     for(i=pCtx->argc-1; i>=0; i--) pCtx->argv[i] = &aMem[pOp->p2+i];
   }
   assert( pCtx->pVdbe==p );
@@ -8214,11 +8208,10 @@ case OP_Function: {            /* group */
     if( rc ) goto abort_due_to_error;
   }
 
-  /* Copy the result of the function into register P3 */
-  if( pOut->flags & (MEM_Str|MEM_Blob) ){
-    sqlite3VdbeChangeEncoding(pOut, encoding);
-    if( sqlite3VdbeMemTooBig(pOut) ) goto too_big;
-  }
+  assert( (pOut->flags&MEM_Str)==0 
+       || pOut->enc==encoding
+       || db->mallocFailed );
+  assert( !sqlite3VdbeMemTooBig(pOut) );
 
   REGISTER_TRACE(pOp->p3, pOut);
   UPDATE_MAX_BLOBSIZE(pOut);
@@ -8344,7 +8337,7 @@ case OP_Init: {          /* jump */
 
 #ifndef SQLITE_OMIT_TRACE
   if( (db->mTrace & (SQLITE_TRACE_STMT|SQLITE_TRACE_LEGACY))!=0
-   && !p->doingRerun
+   && p->minWriteFileFormat!=254  /* tag-20220401a */
    && (zTrace = (pOp->p4.z ? pOp->p4.z : p->zSql))!=0
   ){
 #ifndef SQLITE_OMIT_DEPRECATED
