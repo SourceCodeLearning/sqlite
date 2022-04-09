@@ -588,14 +588,20 @@ void sqlite3VdbeResolveLabel(Vdbe *v, int x){
 ** Mark the VDBE as one that can only be run one time.
 */
 void sqlite3VdbeRunOnlyOnce(Vdbe *p){
-  p->runOnlyOnce = 1;
+  sqlite3VdbeAddOp2(p, OP_Expire, 1, 1);
 }
 
 /*
 ** Mark the VDBE as one that can only be run multiple times.
 */
 void sqlite3VdbeReusable(Vdbe *p){
-  p->runOnlyOnce = 0;
+  int i;
+  for(i=1; ALWAYS(i<p->nOp); i++){
+    if( ALWAYS(p->aOp[i].opcode==OP_Expire) ){
+      p->aOp[1].opcode = OP_Noop;
+      break;
+    }
+  }
 }
 
 #ifdef SQLITE_DEBUG /* sqlite3AssertMayAbort() logic */
@@ -1225,7 +1231,7 @@ void sqlite3VdbeReleaseRegisters(
   u32 mask,            /* Mask of registers to NOT release */
   int bUndefine        /* If true, mark registers as undefined */
 ){
-  if( N==0 ) return;
+  if( N==0 || OptimizationDisabled(pParse->db, SQLITE_ReleaseReg) ) return;
   assert( pParse->pVdbe );
   assert( iFirst>=1 );
   assert( iFirst+N-1<=pParse->nMem );
@@ -3038,9 +3044,7 @@ int sqlite3VdbeHalt(Vdbe *p){
   ** one, or the complete transaction if there is no statement transaction.
   */
 
-  if( p->eVdbeState!=VDBE_RUN_STATE ){
-    return SQLITE_OK;
-  }
+  assert( p->eVdbeState==VDBE_RUN_STATE );
   if( db->mallocFailed ){
     p->rc = SQLITE_NOMEM_BKPT;
   }
@@ -3300,7 +3304,7 @@ int sqlite3VdbeReset(Vdbe *p){
   ** error, then it might not have been halted properly.  So halt
   ** it now.
   */
-  sqlite3VdbeHalt(p);
+  if( p->eVdbeState==VDBE_RUN_STATE ) sqlite3VdbeHalt(p);
 
   /* If the VDBE has been run even partially, then transfer the error code
   ** and error message from the VDBE into the main database structure.  But
@@ -3314,7 +3318,6 @@ int sqlite3VdbeReset(Vdbe *p){
     }else{
       db->errCode = p->rc;
     }
-    if( p->runOnlyOnce ) p->expired = 1;
   }
 
   /* Reset register contents and reclaim error message memory.
@@ -3435,7 +3438,7 @@ void sqlite3VdbeDeleteAuxData(sqlite3 *db, AuxData **pp, int iOp, int mask){
 ** VdbeDelete() also unlinks the Vdbe from the list of VMs associated with
 ** the database connection and frees the object itself.
 */
-void sqlite3VdbeClearObject(sqlite3 *db, Vdbe *p){
+static void sqlite3VdbeClearObject(sqlite3 *db, Vdbe *p){
   SubProgram *pSub, *pNext;
   assert( p->db==0 || p->db==db );
   if( p->aColName ){
@@ -3485,14 +3488,16 @@ void sqlite3VdbeDelete(Vdbe *p){
   db = p->db;
   assert( sqlite3_mutex_held(db->mutex) );
   sqlite3VdbeClearObject(db, p);
-  if( p->pPrev ){
-    p->pPrev->pNext = p->pNext;
-  }else{
-    assert( db->pVdbe==p );
-    db->pVdbe = p->pNext;
-  }
-  if( p->pNext ){
-    p->pNext->pPrev = p->pPrev;
+  if( db->pnBytesFreed==0 ){
+    if( p->pPrev ){
+      p->pPrev->pNext = p->pNext;
+    }else{
+      assert( db->pVdbe==p );
+      db->pVdbe = p->pNext;
+    }
+    if( p->pNext ){
+      p->pNext->pPrev = p->pPrev;
+    }
   }
   sqlite3DbFreeNN(db, p);
 }
@@ -3557,7 +3562,7 @@ int sqlite3VdbeCursorRestore(VdbeCursor *p){
 ** sqlite3VdbeSerialType()
 ** sqlite3VdbeSerialTypeLen()
 ** sqlite3VdbeSerialLen()
-** sqlite3VdbeSerialPut()
+** sqlite3VdbeSerialPut()  <--- in-lined into OP_MakeRecord as of 2022-04-02
 ** sqlite3VdbeSerialGet()
 **
 ** encapsulate the code that serializes values for storage in SQLite
@@ -3669,7 +3674,7 @@ u32 sqlite3VdbeSerialType(Mem *pMem, int file_format, u32 *pLen){
 /*
 ** The sizes for serial types less than 128
 */
-static const u8 sqlite3SmallTypeSizes[] = {
+const u8 sqlite3SmallTypeSizes[128] = {
         /*  0   1   2   3   4   5   6   7   8   9 */   
 /*   0 */   0,  1,  2,  3,  4,  6,  8,  8,  0,  0,
 /*  10 */   0,  0,  0,  0,  1,  1,  2,  2,  3,  3,
@@ -3738,7 +3743,7 @@ u8 sqlite3VdbeOneByteSerialTypeLen(u8 serial_type){
 ** so we trust him.
 */
 #ifdef SQLITE_MIXED_ENDIAN_64BIT_FLOAT
-static u64 floatSwap(u64 in){
+u64 sqlite3FloatSwap(u64 in){
   union {
     u64 r;
     u32 i[2];
@@ -3751,59 +3756,8 @@ static u64 floatSwap(u64 in){
   u.i[1] = t;
   return u.r;
 }
-# define swapMixedEndianFloat(X)  X = floatSwap(X)
-#else
-# define swapMixedEndianFloat(X)
-#endif
+#endif /* SQLITE_MIXED_ENDIAN_64BIT_FLOAT */
 
-/*
-** Write the serialized data blob for the value stored in pMem into 
-** buf. It is assumed that the caller has allocated sufficient space.
-** Return the number of bytes written.
-**
-** nBuf is the amount of space left in buf[].  The caller is responsible
-** for allocating enough space to buf[] to hold the entire field, exclusive
-** of the pMem->u.nZero bytes for a MEM_Zero value.
-**
-** Return the number of bytes actually written into buf[].  The number
-** of bytes in the zero-filled tail is included in the return value only
-** if those bytes were zeroed in buf[].
-*/ 
-u32 sqlite3VdbeSerialPut(u8 *buf, Mem *pMem, u32 serial_type){
-  u32 len;
-
-  /* Integer and Real */
-  if( serial_type<=7 && serial_type>0 ){
-    u64 v;
-    u32 i;
-    if( serial_type==7 ){
-      assert( sizeof(v)==sizeof(pMem->u.r) );
-      memcpy(&v, &pMem->u.r, sizeof(v));
-      swapMixedEndianFloat(v);
-    }else{
-      v = pMem->u.i;
-    }
-    len = i = sqlite3SmallTypeSizes[serial_type];
-    assert( i>0 );
-    do{
-      buf[--i] = (u8)(v&0xFF);
-      v >>= 8;
-    }while( i );
-    return len;
-  }
-
-  /* String or blob */
-  if( serial_type>=12 ){
-    assert( pMem->n + ((pMem->flags & MEM_Zero)?pMem->u.nZero:0)
-             == (int)sqlite3VdbeSerialTypeLen(serial_type) );
-    len = pMem->n;
-    if( len>0 ) memcpy(buf, pMem->z, len);
-    return len;
-  }
-
-  /* NULL or constants 0 or 1 */
-  return 0;
-}
 
 /* Input "x" is a sequence of unsigned characters that represent a
 ** big-endian integer.  Return the equivalent native integer
@@ -4470,14 +4424,22 @@ int sqlite3VdbeRecordCompareWithSkip(
   ** two elements in the keys are equal. Fix the various stack variables so
   ** that this routine begins comparing at the second field. */
   if( bSkip ){
-    u32 s1;
-    idx1 = 1 + getVarint32(&aKey1[1], s1);
+    u32 s1 = aKey1[1];
+    if( s1<0x80 ){
+      idx1 = 2;
+    }else{
+      idx1 = 1 + sqlite3GetVarint32(&aKey1[1], &s1);
+    }
     szHdr1 = aKey1[0];
     d1 = szHdr1 + sqlite3VdbeSerialTypeLen(s1);
     i = 1;
     pRhs++;
   }else{
-    idx1 = getVarint32(aKey1, szHdr1);
+    if( (szHdr1 = aKey1[0])<0x80 ){
+      idx1 = 1;
+    }else{
+      idx1 = sqlite3GetVarint32(aKey1, &szHdr1);
+    }
     d1 = szHdr1;
     i = 0;
   }

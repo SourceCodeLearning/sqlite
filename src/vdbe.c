@@ -991,10 +991,18 @@ jump_to_p2:
   break;
 }
 
-/* Opcode:  Return P1 * P3 * *
+/* Opcode:  Return P1 P2 P3 * *
 **
 ** Jump to the next instruction after the address in register P1.  After
 ** the jump, register P1 becomes undefined.
+**
+** P2 is not used by the byte-code engine.  However, if P2 is positive
+** and also less than the current address, then the "EXPLAIN" output
+** formatter in the CLI will indent all opcodes from the P2 opcode up
+** to be not including the current Return.   P2 should be the first opcode
+** in the subroutine from which this opcode is returnning.  Thus the P2
+** value is a byte-code indentation hint.  See tag-20220407a in
+** wherecode.c and shell.c.
 **
 ** P3 is not used by the byte-code engine.  However, the code generator
 ** sets P3 to address of the associated OP_BeginSubrtn opcode, if there is
@@ -1129,11 +1137,10 @@ case OP_Halt: {
   VdbeFrame *pFrame;
   int pcx;
 
-  pcx = (int)(pOp - aOp);
 #ifdef SQLITE_DEBUG
   if( pOp->p2==OE_Abort ){ sqlite3VdbeAssertAbortable(p); }
 #endif
-  if( pOp->p1==SQLITE_OK && p->pFrame ){
+  if( p->pFrame && pOp->p1==SQLITE_OK ){
     /* Halt the sub-program. Return control to the parent frame. */
     pFrame = p->pFrame;
     p->pFrame = pFrame->pParent;
@@ -1155,7 +1162,6 @@ case OP_Halt: {
   }
   p->rc = pOp->p1;
   p->errorAction = (u8)pOp->p2;
-  p->pc = pcx;
   assert( pOp->p5<=4 );
   if( p->rc ){
     if( pOp->p5 ){
@@ -1172,6 +1178,7 @@ case OP_Halt: {
     }else{
       sqlite3VdbeError(p, "%s", pOp->p4.z);
     }
+    pcx = (int)(pOp - aOp);
     sqlite3_log(pOp->p1, "abort at %d in [%s]: %s", pcx, p->zSql, p->zErrMsg);
   }
   rc = sqlite3VdbeHalt(p);
@@ -2088,23 +2095,23 @@ case OP_Ge: {             /* same as TK_GE, jump, in1, in3 */
     assert( (pOp->p5 & SQLITE_AFF_MASK)!=SQLITE_AFF_TEXT || CORRUPT_DB );
     /* Common case of comparison of two integers */
     if( pIn3->u.i > pIn1->u.i ){
-      iCompare = +1;
       if( sqlite3aGTb[pOp->opcode] ){
         VdbeBranchTaken(1, (pOp->p5 & SQLITE_NULLEQ)?2:3);
         goto jump_to_p2;
       }
+      iCompare = +1;
     }else if( pIn3->u.i < pIn1->u.i ){
-      iCompare = -1;
       if( sqlite3aLTb[pOp->opcode] ){
         VdbeBranchTaken(1, (pOp->p5 & SQLITE_NULLEQ)?2:3);
         goto jump_to_p2;
       }
+      iCompare = -1;
     }else{
-      iCompare = 0;
       if( sqlite3aEQb[pOp->opcode] ){
         VdbeBranchTaken(1, (pOp->p5 & SQLITE_NULLEQ)?2:3);
         goto jump_to_p2;
       }
+      iCompare = 0;
     }
     VdbeBranchTaken(0, (pOp->p5 & SQLITE_NULLEQ)?2:3);
     break;
@@ -2131,11 +2138,11 @@ case OP_Ge: {             /* same as TK_GE, jump, in1, in3 */
       ** then the result is always NULL.
       ** The jump is taken if the SQLITE_JUMPIFNULL bit is set.
       */
-      iCompare = 1;    /* Operands are not equal */
       VdbeBranchTaken(2,3);
       if( pOp->p5 & SQLITE_JUMPIFNULL ){
         goto jump_to_p2;
       }
+      iCompare = 1;    /* Operands are not equal */
       break;
     }
   }else{
@@ -2241,9 +2248,8 @@ case OP_ElseEq: {       /* same as TK_ESCAPE, jump */
 ** Set the permutation used by the OP_Compare operator in the next
 ** instruction.  The permutation is stored in the P4 operand.
 **
-** The permutation is only valid until the next OP_Compare that has
-** the OPFLAG_PERMUTE bit set in P5. Typically the OP_Permutation should 
-** occur immediately prior to the OP_Compare.
+** The permutation is only valid for the next opcode which must be
+** an OP_Compare that has the OPFLAG_PERMUTE bit set in P5.
 **
 ** The first integer in the P4 integer array is the length of the array
 ** and does not become part of the permutation.
@@ -2275,6 +2281,8 @@ case OP_Permutation: {
 ** The comparison is a sort comparison, so NULLs compare equal,
 ** NULLs are less than numbers, numbers are less than strings,
 ** and strings are less than blobs.
+**
+** This opcode must be immediately followed by an OP_Jump opcode.
 */
 case OP_Compare: {
   int n;
@@ -2333,6 +2341,7 @@ case OP_Compare: {
       break;
     }
   }
+  assert( pOp[1].opcode==OP_Jump );
   break;
 }
 
@@ -2341,8 +2350,11 @@ case OP_Compare: {
 ** Jump to the instruction at address P1, P2, or P3 depending on whether
 ** in the most recent OP_Compare instruction the P1 vector was less than
 ** equal to, or greater than the P2 vector, respectively.
+**
+** This opcode must immediately follow an OP_Compare opcode.
 */
 case OP_Jump: {             /* jump */
+  assert( pOp>aOp && pOp[-1].opcode==OP_Compare );
   if( iCompare<0 ){
     VdbeBranchTaken(0,4); pOp = &aOp[pOp->p1 - 1];
   }else if( iCompare==0 ){
@@ -2739,7 +2751,11 @@ op_column_restart:
       assert( pC->szRow<=65536 );  /* Maximum page size is 64KiB */
     }
     pC->cacheStatus = p->cacheCtr;
-    pC->iHdrOffset = getVarint32(pC->aRow, aOffset[0]);
+    if( (aOffset[0] = pC->aRow[0])<0x80 ){
+      pC->iHdrOffset = 1;
+    }else{
+      pC->iHdrOffset = sqlite3GetVarint32(pC->aRow, aOffset);
+    }
     pC->nHdrParsed = 0;
 
     if( pC->szRow<aOffset[0] ){      /*OPTIMIZATION-IF-FALSE*/
@@ -3384,15 +3400,47 @@ case OP_MakeRecord: {
   while( 1 /*exit-by-break*/ ){
     serial_type = pRec->uTemp;
     /* EVIDENCE-OF: R-06529-47362 Following the size varint are one or more
-    ** additional varints, one per column. */
-    if( serial_type<0x80 ){
+    ** additional varints, one per column.
+    ** EVIDENCE-OF: R-64536-51728 The values for each column in the record
+    ** immediately follow the header. */
+    if( serial_type<=7 ){
       *(zHdr++) = serial_type;
+      if( serial_type==0 ){
+        /* NULL value.  No change in zPayload */
+      }else{
+        u64 v;
+        u32 i;
+        if( serial_type==7 ){
+          assert( sizeof(v)==sizeof(pRec->u.r) );
+          memcpy(&v, &pRec->u.r, sizeof(v));
+          swapMixedEndianFloat(v);
+        }else{
+          v = pRec->u.i;
+        }
+        len = i = sqlite3SmallTypeSizes[serial_type];
+        assert( i>0 );
+        while( 1 /*exit-by-break*/ ){
+          zPayload[--i] = (u8)(v&0xFF);
+          if( i==0 ) break;
+          v >>= 8;
+        }
+        zPayload += len;
+      }
+    }else if( serial_type<0x80 ){
+      *(zHdr++) = serial_type;
+      if( serial_type>=14 && pRec->n>0 ){
+        assert( pRec->z!=0 );
+        memcpy(zPayload, pRec->z, pRec->n);
+        zPayload += pRec->n;
+      }
     }else{
       zHdr += sqlite3PutVarint(zHdr, serial_type);
+      if( pRec->n ){
+        assert( pRec->z!=0 );
+        memcpy(zPayload, pRec->z, pRec->n);
+        zPayload += pRec->n;
+      }
     }
-    /* EVIDENCE-OF: R-64536-51728 The values for each column in the record
-    ** immediately follow the header. */
-    zPayload += sqlite3VdbeSerialPut(zPayload, pRec, serial_type); /* content */
     if( pRec==pLast ) break;
     pRec++;
   }
@@ -3614,7 +3662,10 @@ case OP_Savepoint: {
     }
   }
   if( rc ) goto abort_due_to_error;
-
+  if( p->eVdbeState==VDBE_HALT_STATE ){
+    rc = SQLITE_DONE;
+    goto vdbe_return;
+  }
   break;
 }
 
@@ -3718,6 +3769,7 @@ case OP_AutoCommit: {
 */
 case OP_Transaction: {
   Btree *pBt;
+  Db *pDb;
   int iMeta = 0;
 
   assert( p->bIsReader );
@@ -3737,7 +3789,8 @@ case OP_Transaction: {
     }
     goto abort_due_to_error;
   }
-  pBt = db->aDb[pOp->p1].pBt;
+  pDb = &db->aDb[pOp->p1];
+  pBt = pDb->pBt;
 
   if( pBt ){
     rc = sqlite3BtreeBeginTrans(pBt, pOp->p2, &iMeta);
@@ -3778,8 +3831,7 @@ case OP_Transaction: {
   assert( pOp->p5==0 || pOp->p4type==P4_INT32 );
   if( rc==SQLITE_OK
    && pOp->p5
-   && (iMeta!=pOp->p3
-      || db->aDb[pOp->p1].pSchema->iGeneration!=pOp->p4.i)
+   && (iMeta!=pOp->p3 || pDb->pSchema->iGeneration!=pOp->p4.i)
   ){
     /*
     ** IMPLEMENTATION-OF: R-03189-51135 As each SQL statement runs, the schema
@@ -4922,11 +4974,8 @@ case OP_NoConflict:     /* jump, in3 */
 case OP_NotFound:       /* jump, in3 */
 case OP_Found: {        /* jump, in3 */
   int alreadyExists;
-  int takeJump;
   int ii;
   VdbeCursor *pC;
-  int res;
-  UnpackedRecord *pFree;
   UnpackedRecord *pIdxKey;
   UnpackedRecord r;
 
@@ -4946,9 +4995,11 @@ case OP_Found: {        /* jump, in3 */
   assert( pC->uc.pCursor!=0 );
   assert( pC->isTable==0 );
   if( pOp->p4.i>0 ){
-    r.pKeyInfo = pC->pKeyInfo;
+    /* Key values in an array of registers */
     r.nField = (u16)pOp->p4.i;
+    r.pKeyInfo = pC->pKeyInfo;
     r.aMem = pIn3;
+    r.default_rc = 0;
 #ifdef SQLITE_DEBUG
     for(ii=0; ii<r.nField; ii++){
       assert( memIsValid(&r.aMem[ii]) );
@@ -4956,37 +5007,25 @@ case OP_Found: {        /* jump, in3 */
       if( ii ) REGISTER_TRACE(pOp->p3+ii, &r.aMem[ii]);
     }
 #endif
-    pIdxKey = &r;
-    pFree = 0;
+    rc = sqlite3BtreeIndexMoveto(pC->uc.pCursor, &r, &pC->seekResult);
   }else{
+    /* Composite key generated by OP_MakeRecord */
     assert( pIn3->flags & MEM_Blob );
+    assert( pOp->opcode!=OP_NoConflict );
     rc = ExpandBlob(pIn3);
     assert( rc==SQLITE_OK || rc==SQLITE_NOMEM );
     if( rc ) goto no_mem;
-    pFree = pIdxKey = sqlite3VdbeAllocUnpackedRecord(pC->pKeyInfo);
+    pIdxKey = sqlite3VdbeAllocUnpackedRecord(pC->pKeyInfo);
     if( pIdxKey==0 ) goto no_mem;
     sqlite3VdbeRecordUnpack(pC->pKeyInfo, pIn3->n, pIn3->z, pIdxKey);
+    pIdxKey->default_rc = 0;
+    rc = sqlite3BtreeIndexMoveto(pC->uc.pCursor, pIdxKey, &pC->seekResult);
+    sqlite3DbFreeNN(db, pIdxKey);
   }
-  pIdxKey->default_rc = 0;
-  takeJump = 0;
-  if( pOp->opcode==OP_NoConflict ){
-    /* For the OP_NoConflict opcode, take the jump if any of the
-    ** input fields are NULL, since any key with a NULL will not
-    ** conflict */
-    for(ii=0; ii<pIdxKey->nField; ii++){
-      if( pIdxKey->aMem[ii].flags & MEM_Null ){
-        takeJump = 1;
-        break;
-      }
-    }
-  }
-  rc = sqlite3BtreeIndexMoveto(pC->uc.pCursor, pIdxKey, &res);
-  if( pFree ) sqlite3DbFreeNN(db, pFree);
   if( rc!=SQLITE_OK ){
     goto abort_due_to_error;
   }
-  pC->seekResult = res;
-  alreadyExists = (res==0);
+  alreadyExists = (pC->seekResult==0);
   pC->nullRow = 1-alreadyExists;
   pC->deferredMoveto = 0;
   pC->cacheStatus = CACHE_STALE;
@@ -4994,9 +5033,25 @@ case OP_Found: {        /* jump, in3 */
     VdbeBranchTaken(alreadyExists!=0,2);
     if( alreadyExists ) goto jump_to_p2;
   }else{
-    VdbeBranchTaken(takeJump||alreadyExists==0,2);
-    if( takeJump || !alreadyExists ) goto jump_to_p2;
-    if( pOp->opcode==OP_IfNoHope ) pC->seekHit = pOp->p4.i;
+    if( !alreadyExists ){
+      VdbeBranchTaken(1,2);
+      goto jump_to_p2;
+    }
+    if( pOp->opcode==OP_NoConflict ){
+      /* For the OP_NoConflict opcode, take the jump if any of the
+      ** input fields are NULL, since any key with a NULL will not
+      ** conflict */
+      for(ii=0; ii<r.nField; ii++){
+        if( r.aMem[ii].flags & MEM_Null ){
+          VdbeBranchTaken(1,2);
+          goto jump_to_p2;
+        }
+      }
+    }
+    VdbeBranchTaken(0,2);
+    if( pOp->opcode==OP_IfNoHope ){
+      pC->seekHit = pOp->p4.i;
+    }
   }
   break;
 }
@@ -8566,7 +8621,7 @@ abort_due_to_error:
   testcase( sqlite3GlobalConfig.xLog!=0 );
   sqlite3_log(rc, "statement aborts at %d: [%s] %s", 
                    (int)(pOp - aOp), p->zSql, p->zErrMsg);
-  sqlite3VdbeHalt(p);
+  if( p->eVdbeState==VDBE_RUN_STATE ) sqlite3VdbeHalt(p);
   if( rc==SQLITE_IOERR_NOMEM ) sqlite3OomFault(db);
   if( rc==SQLITE_CORRUPT && db->autoCommit==0 ){
     db->flags |= SQLITE_CorruptRdOnly;
