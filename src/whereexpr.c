@@ -64,7 +64,7 @@ static int whereClauseInsert(WhereClause *pWC, Expr *p, u16 wtFlags){
   if( pWC->nTerm>=pWC->nSlot ){
     WhereTerm *pOld = pWC->a;
     sqlite3 *db = pWC->pWInfo->pParse->db;
-    pWC->a = sqlite3DbMallocRawNN(db, sizeof(pWC->a[0])*pWC->nSlot*2 );
+    pWC->a = sqlite3WhereMalloc(pWC->pWInfo, sizeof(pWC->a[0])*pWC->nSlot*2 );
     if( pWC->a==0 ){
       if( wtFlags & TERM_DYNAMIC ){
         sqlite3ExprDelete(db, p);
@@ -73,10 +73,7 @@ static int whereClauseInsert(WhereClause *pWC, Expr *p, u16 wtFlags){
       return 0;
     }
     memcpy(pWC->a, pOld, sizeof(pWC->a[0])*pWC->nTerm);
-    if( pOld!=pWC->aStatic ){
-      sqlite3DbFree(db, pOld);
-    }
-    pWC->nSlot = sqlite3DbMallocSize(db, pWC->a)/sizeof(pWC->a[0]);
+    pWC->nSlot = pWC->nSlot*2;
   }
   pTerm = &pWC->a[idx = pWC->nTerm++];
   if( (wtFlags & TERM_VIRTUAL)==0 ) pWC->nBase = pWC->nTerm;
@@ -466,7 +463,7 @@ static int isAuxiliaryVtabOperator(
 static void transferJoinMarkings(Expr *pDerived, Expr *pBase){
   if( pDerived ){
     pDerived->flags |= pBase->flags & EP_FromJoin;
-    pDerived->w.iRightJoinTable = pBase->w.iRightJoinTable;
+    pDerived->w.iJoin = pBase->w.iJoin;
   }
 }
 
@@ -1113,7 +1110,7 @@ static void exprAnalyze(
 #endif
 
   if( ExprHasProperty(pExpr, EP_FromJoin) ){
-    Bitmask x = sqlite3WhereGetMask(pMaskSet, pExpr->w.iRightJoinTable);
+    Bitmask x = sqlite3WhereGetMask(pMaskSet, pExpr->w.iJoin);
     prereqAll |= x;
     extraRight = x-1;  /* ON clause terms may not be used with an index
                        ** on left table of a LEFT JOIN.  Ticket #3015 */
@@ -1464,7 +1461,7 @@ static void exprAnalyze(
             0, sqlite3ExprDup(db, pRight, 0));
         if( ExprHasProperty(pExpr, EP_FromJoin) && pNewExpr ){
           ExprSetProperty(pNewExpr, EP_FromJoin);
-          pNewExpr->w.iRightJoinTable = pExpr->w.iRightJoinTable;
+          pNewExpr->w.iJoin = pExpr->w.iJoin;
         }
         idxNew = whereClauseInsert(pWC, pNewExpr, TERM_VIRTUAL|TERM_DYNAMIC);
         testcase( idxNew==0 );
@@ -1685,9 +1682,6 @@ void sqlite3WhereClauseClear(WhereClause *pWC){
       if( a==aLast ) break;
       a++;
     }
-  }
-  if( pWC->a!=pWC->aStatic ){
-    sqlite3DbFree(db, pWC->a);
   }
 }
 

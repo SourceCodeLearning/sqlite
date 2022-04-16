@@ -640,8 +640,9 @@ static int codeEqualityTerm(
     i = pLevel->u.in.nIn;
     pLevel->u.in.nIn += nEq;
     pLevel->u.in.aInLoop =
-       sqlite3DbReallocOrFree(pParse->db, pLevel->u.in.aInLoop,
-                              sizeof(pLevel->u.in.aInLoop[0])*pLevel->u.in.nIn);
+       sqlite3WhereRealloc(pTerm->pWC->pWInfo,
+                           pLevel->u.in.aInLoop,
+                           sizeof(pLevel->u.in.aInLoop[0])*pLevel->u.in.nIn);
     pIn = pLevel->u.in.aInLoop;
     if( pIn ){
       int iMap = 0;               /* Index in aiMap[] */
@@ -1063,7 +1064,7 @@ static void codeCursorHint(
     if( pTabItem->fg.jointype & JT_LEFT ){
       Expr *pExpr = pTerm->pExpr;
       if( !ExprHasProperty(pExpr, EP_FromJoin) 
-       || pExpr->w.iRightJoinTable!=pTabItem->iCursor
+       || pExpr->w.iJoin!=pTabItem->iCursor
       ){
         sWalker.eCode = 0;
         sWalker.xExprCallback = codeCursorHintIsOrFunction;

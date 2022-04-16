@@ -5967,7 +5967,7 @@ bypass_moveto_root:
     assert( lwr==upr+1 || (pPage->intKey && !pPage->leaf) );
     assert( pPage->isInit );
     if( pPage->leaf ){
-      assert( pCur->ix<pCur->pPage->nCell );
+      assert( pCur->ix<pCur->pPage->nCell || CORRUPT_DB );
       pCur->ix = (u16)idx;
       *pRes = c;
       rc = SQLITE_OK;
@@ -8491,7 +8491,7 @@ static int balance_nonroot(
     iOvflSpace += sz;
     assert( sz<=pBt->maxLocal+23 );
     assert( iOvflSpace <= (int)pBt->pageSize );
-    for(k=0; b.ixNx[k]<=i && ALWAYS(k<NB*2); k++){}
+    for(k=0; b.ixNx[k]<=j && ALWAYS(k<NB*2); k++){}
     pSrcEnd = b.apEnd[k];
     if( SQLITE_WITHIN(pSrcEnd, pCell, pCell+sz) ){
       rc = SQLITE_CORRUPT_BKPT;
