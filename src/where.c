@@ -102,7 +102,7 @@ int sqlite3WhereOrderByLimitOptLabel(WhereInfo *pWInfo){
   }
   pInner = &pWInfo->a[pWInfo->nLevel-1];
   assert( pInner->addrNxt!=0 );
-  return pInner->addrNxt;
+  return pInner->pRJ ? pWInfo->iContinue : pInner->addrNxt;
 }
 
 /*
@@ -832,9 +832,7 @@ static SQLITE_NOINLINE void constructAutomaticIndex(
     ** WHERE clause (or the ON clause of a LEFT join) that constrain which
     ** rows of the target table (pSrc) that can be used. */
     if( (pTerm->wtFlags & TERM_VIRTUAL)==0
-     && ((pSrc->fg.jointype&(JT_LEFT|JT_LTORJ))==0
-               || ExprHasProperty(pExpr,EP_FromJoin))
-     && sqlite3ExprIsTableConstant(pExpr, pSrc->iCursor)
+     && sqlite3ExprIsTableConstraint(pExpr, pSrc)
     ){
       pPartial = sqlite3ExprAnd(pParse, pPartial,
                                 sqlite3ExprDup(pParse->db, pExpr, 0));
@@ -1073,7 +1071,7 @@ static SQLITE_NOINLINE void sqlite3ConstructBloomFilter(
     for(pTerm=pWInfo->sWC.a; pTerm<pWCEnd; pTerm++){
       Expr *pExpr = pTerm->pExpr;
       if( (pTerm->wtFlags & TERM_VIRTUAL)==0
-       && sqlite3ExprIsTableConstant(pExpr, iCur)
+       && sqlite3ExprIsTableConstraint(pExpr, pItem)
       ){
         sqlite3ExprIfFalse(pParse, pTerm->pExpr, addrCont, SQLITE_JUMPIFNULL);
       }
@@ -6024,6 +6022,7 @@ void sqlite3WhereEnd(WhereInfo *pWInfo){
       WhereRightJoin *pRJ = pLevel->pRJ;
       sqlite3VdbeResolveLabel(v, pLevel->addrCont);
       pLevel->addrCont = 0;
+      pRJ->endSubrtn = sqlite3VdbeCurrentAddr(v);
       sqlite3VdbeAddOp3(v, OP_Return, pRJ->regReturn, pRJ->addrSubrtn, 1);
       VdbeCoverage(v);
       assert( pParse->withinRJSubrtn>0 );

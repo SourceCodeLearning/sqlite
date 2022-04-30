@@ -87,6 +87,53 @@ static void sqlite3TreeViewItem(TreeView *p, const char *zLabel,u8 moreFollows){
 }
 
 /*
+** Show a list of Column objects in tree format.
+*/
+void sqlite3TreeViewColumnList(
+  TreeView *pView,
+  const Column *aCol,
+  int nCol,
+  u8 moreToFollow
+){
+  int i;
+  sqlite3TreeViewPush(&pView, moreToFollow);
+  sqlite3TreeViewLine(pView, "COLUMNS");
+  for(i=0; i<nCol; i++){
+    u16 flg = aCol[i].colFlags;
+    int moreToFollow = i<(nCol - 1);
+    sqlite3TreeViewPush(&pView, moreToFollow);
+    sqlite3TreeViewLine(pView, 0);
+    printf(" %s", aCol[i].zCnName);
+    switch( aCol[i].eCType ){
+      case COLTYPE_ANY:      printf(" ANY");        break;
+      case COLTYPE_BLOB:     printf(" BLOB");       break;
+      case COLTYPE_INT:      printf(" INT");        break;
+      case COLTYPE_INTEGER:  printf(" INTEGER");    break;
+      case COLTYPE_REAL:     printf(" REAL");       break;
+      case COLTYPE_TEXT:     printf(" TEXT");       break;
+      case COLTYPE_CUSTOM: {
+        if( flg & COLFLAG_HASTYPE ){
+          const char *z = aCol[i].zCnName;
+          z += strlen(z)+1;
+          printf(" X-%s", z);
+          break;
+        }
+      }
+    }
+    if( flg & COLFLAG_PRIMKEY ) printf(" PRIMARY KEY");
+    if( flg & COLFLAG_HIDDEN ) printf(" HIDDEN");
+#ifdef COLFLAG_NOEXPAND
+    if( flg & COLFLAG_NOEXPAND ) printf(" NO-EXPAND");
+#endif
+    if( flg ) printf(" flags=%04x", flg);
+    printf("\n");      
+    fflush(stdout);
+    sqlite3TreeViewPop(&pView);
+  }
+  sqlite3TreeViewPop(&pView);
+}
+
+/*
 ** Generate a human-readable description of a WITH clause.
 */
 void sqlite3TreeViewWith(TreeView *pView, const With *pWith, u8 moreToFollow){
@@ -141,6 +188,7 @@ void sqlite3TreeViewSrcList(TreeView *pView, const SrcList *pSrc){
   for(i=0; i<pSrc->nSrc; i++){
     const SrcItem *pItem = &pSrc->a[i];
     StrAccum x;
+    int n = 0;
     char zLine[100];
     sqlite3StrAccumInit(&x, 0, zLine, sizeof(zLine), 0);
     x.printfFlags |= SQLITE_PRINTF_INTERNAL;
@@ -168,10 +216,21 @@ void sqlite3TreeViewSrcList(TreeView *pView, const SrcList *pSrc){
       sqlite3_str_appendf(&x, " CteUse=0x%p", pItem->u2.pCteUse);
     }
     sqlite3StrAccumFinish(&x);
-    sqlite3TreeViewItem(pView, zLine, i<pSrc->nSrc-1); 
+    sqlite3TreeViewItem(pView, zLine, i<pSrc->nSrc-1);
+    n = 0;
+    if( pItem->pSelect ) n++;
+    if( pItem->fg.isTabFunc ) n++;
+    if( pItem->fg.isUsing ) n++;
+    if( pItem->fg.isUsing ){
+      sqlite3TreeViewIdList(pView, pItem->u3.pUsing, (--n)>0, "USING");
+    }
     if( pItem->pSelect ){
+      if( pItem->pTab ){
+        Table *pTab = pItem->pTab;
+        sqlite3TreeViewColumnList(pView, pTab->aCol, pTab->nCol, 1);
+      }
       assert( pItem->fg.isNestedFrom == IsNestedFrom(pItem->pSelect) );
-      sqlite3TreeViewSelect(pView, pItem->pSelect, 0);
+      sqlite3TreeViewSelect(pView, pItem->pSelect, (--n)>0);
     }
     if( pItem->fg.isTabFunc ){
       sqlite3TreeViewExprList(pView, pItem->u1.pFuncArg, 0, "func-args:");
@@ -653,7 +712,17 @@ void sqlite3TreeViewExpr(TreeView *pView, const Expr *pExpr, u8 moreToFollow){
       break;
     }
     case TK_IN: {
-      sqlite3TreeViewLine(pView, "IN flags=0x%x", pExpr->flags);
+      sqlite3_str *pStr = sqlite3_str_new(0);
+      char *z;
+      sqlite3_str_appendf(pStr, "IN flags=0x%x", pExpr->flags);
+      if( pExpr->iTable ) sqlite3_str_appendf(pStr, " iTable=%d",pExpr->iTable);
+      if( ExprHasProperty(pExpr, EP_Subrtn) ){
+        sqlite3_str_appendf(pStr, " subrtn(%d,%d)",
+            pExpr->y.sub.regReturn, pExpr->y.sub.iAddr);
+      }
+      z = sqlite3_str_finish(pStr);
+      sqlite3TreeViewLine(pView, z);
+      sqlite3_free(z);
       sqlite3TreeViewExpr(pView, pExpr->pLeft, 1);
       if( ExprUseXSelect(pExpr) ){
         sqlite3TreeViewSelect(pView, pExpr->x.pSelect, 0);
