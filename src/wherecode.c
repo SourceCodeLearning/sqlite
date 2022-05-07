@@ -612,21 +612,19 @@ static int codeEqualityTerm(
       eType = sqlite3FindInIndex(pParse, pX, IN_INDEX_LOOP, 0, 0, &iTab);
     }else{
       Expr *pExpr = pTerm->pExpr;
-      if(  pExpr->iTable==0 || !ExprHasProperty(pExpr, EP_Subrtn) ){
+      if( pExpr->iTable==0 || !ExprHasProperty(pExpr, EP_Subrtn) ){
         sqlite3 *db = pParse->db;
         pX = removeUnindexableInClauseTerms(pParse, iEq, pLoop, pX);
         if( !db->mallocFailed ){
           aiMap = (int*)sqlite3DbMallocZero(pParse->db, sizeof(int)*nEq);
           eType = sqlite3FindInIndex(pParse, pX, IN_INDEX_LOOP, 0, aiMap,&iTab);
           pExpr->iTable = iTab;
-          pExpr->op2 = eType;
         }
         sqlite3ExprDelete(db, pX);
       }else{
-        sqlite3VdbeAddOp2(v, OP_Gosub, pExpr->y.sub.regReturn,
-                          pExpr->y.sub.iAddr);
+        aiMap = (int*)sqlite3DbMallocZero(pParse->db, sizeof(int)*nEq);
+        eType = sqlite3FindInIndex(pParse, pX, IN_INDEX_LOOP|IN_INDEX_REUSE_CUR,                                   0, aiMap,&iTab);
         iTab = pExpr->iTable;
-        eType = pExpr->op2;
       }
       pX = pExpr;
     }
@@ -1255,12 +1253,12 @@ static void preserveExpr(IdxExprTrans *pTrans, Expr *pExpr){
 static int whereIndexExprTransNode(Walker *p, Expr *pExpr){
   IdxExprTrans *pX = p->u.pIdxTrans;
   if( sqlite3ExprCompare(0, pExpr, pX->pIdxExpr, pX->iTabCur)==0 ){
+    pExpr = sqlite3ExprSkipCollate(pExpr);
     preserveExpr(pX, pExpr);
     pExpr->affExpr = sqlite3ExprAffinity(pExpr);
     pExpr->op = TK_COLUMN;
     pExpr->iTable = pX->iIdxCur;
     pExpr->iColumn = pX->iIdxCol;
-    testcase( ExprHasProperty(pExpr, EP_Skip) );
     testcase( ExprHasProperty(pExpr, EP_Unlikely) );
     ExprClearProperty(pExpr, EP_Skip|EP_Unlikely|EP_WinFunc|EP_Subrtn);
     pExpr->y.pTab = 0;
@@ -1414,6 +1412,8 @@ static SQLITE_NOINLINE void filterPullDown(
     /*         ,--- Because sqlite3ConstructBloomFilter() has will not have set
     **  vvvvv--'    pLevel->regFilter if this were true. */
     if( NEVER(pLoop->prereq & notReady) ) continue;
+    assert( pLevel->addrBrk==0 );
+    pLevel->addrBrk = addrNxt;
     if( pLoop->wsFlags & WHERE_IPK ){
       WhereTerm *pTerm = pLoop->aLTerm[0];
       int regRowid;
@@ -1440,6 +1440,7 @@ static SQLITE_NOINLINE void filterPullDown(
       VdbeCoverage(pParse->pVdbe);
     }
     pLevel->regFilter = 0;
+    pLevel->addrBrk = 0;
   }
 }
 
@@ -2620,7 +2621,7 @@ Bitmask sqlite3WhereCodeOneLoopStart(
       pE = pTerm->pExpr;
       assert( pE!=0 );
       if( (pTabItem->fg.jointype & (JT_LEFT|JT_LTORJ))
-       && !ExprHasProperty(pE,EP_FromJoin)
+       && !ExprHasProperty(pE,EP_FromJoin|EP_InnerJoin)
       ){
         continue;
       }
