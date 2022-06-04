@@ -115,10 +115,8 @@
             stderr("Restarting the app requires reloading the page.");
             wMsg('error', err);
         }
-        fiddleModule.setStatus('Exception thrown, see JavaScript console:',text);
-        /*fiddleModule.setStatus = function(text) {
-            console.error('[post-exception status]', text);
-        };*/
+        console.error(err);
+        fiddleModule.setStatus('Exception thrown, see JavaScript console: '+err);
     };
 
     const Sqlite3Shell = {
@@ -236,8 +234,9 @@
                 fiddleModule.FS.createDataFile("/", fn, buffer, true, true);
                 const oldName = Sqlite3Shell.dbFilename();
                 Sqlite3Shell.exec('.open "/'+fn+'"');
-                if(oldName !== fn){
-                    fiddleModule.FS.unlink(oldName);
+                if(oldName && oldName !== fn){
+                    try{fiddleModule.FS.unlink(oldName);}
+                    catch(e){/*ignored*/}
                 }
                 stdout("Replaced DB with",fn+".");
                 return;
