@@ -572,4 +572,128 @@ do_execsql_test join8-17091 {
   SELECT t3.a FROM t4 RIGHT JOIN t3 ON (x=a) WHERE (b, 4) IS (SELECT 3, 4);
 } {1}
 
+# 2022-06-06
+# https://sqlite.org/forum/forumpost/206d99a16dd9212f
+# tag-20191211-001
+#
+reset_db
+do_execsql_test join8-18000 {
+  CREATE TABLE t1(a BOOLEAN); INSERT INTO t1 VALUES (false);
+  CREATE TABLE t2(x INT);     INSERT INTO t2 VALUES (0);
+  SELECT *, x NOTNULL, (x NOTNULL)=a FROM t2 RIGHT JOIN t1 ON true WHERE (x NOTNULL)=a;
+} {}
+do_execsql_test join8-18010 {
+  CREATE INDEX t1a ON t1(a);
+  SELECT *, x NOTNULL, (x NOTNULL)=a FROM t2 RIGHT JOIN t1 ON true WHERE (x NOTNULL)=a;
+} {}
+
+do_execsql_test join8-18020 {
+  CREATE TABLE t3(z);
+  INSERT INTO t3 VALUES('t3value');
+  SELECT *, x NOTNULL, (x NOTNULL)=a FROM t2 RIGHT JOIN t1 ON true INNER JOIN t3 ON (x NOTNULL)=a;
+} {}
+
+ifcapable rtree {
+  do_execsql_test join8-18030 {
+    CREATE VIRTUAL TABLE rtree1 USING rtree(a, x1, x2);
+    INSERT INTO rtree1 VALUES(0, 0, 0);
+  }
+  do_execsql_test join8-18040 {
+    SELECT *, x NOTNULL, (x NOTNULL)=a FROM t2 
+      RIGHT JOIN rtree1 ON true INNER JOIN t3 ON (x NOTNULL)=+a;
+  } {}
+  do_execsql_test join8-18050 {
+    SELECT *, x NOTNULL, (x NOTNULL)=a FROM t2 
+      RIGHT JOIN rtree1 ON true INNER JOIN t3 ON (x NOTNULL)=a;
+  } {}
+}
+
+
+reset_db
+do_execsql_test join8-19000 {
+  CREATE TABLE t1(a INT);
+  CREATE TABLE t2(b INT, c INT);
+  CREATE TABLE t3(d INT);
+
+  INSERT INTO t1 VALUES(10);
+  INSERT INTO t2 VALUES(50,51);
+  INSERT INTO t3 VALUES(299);
+
+  CREATE INDEX t2b ON t2( (b IS NOT NULL) );
+}
+
+do_execsql_test join8-19010 {
+  SELECT * FROM t1 LEFT JOIN t2 ON true INNER JOIN t3 ON (b IS NOT NULL)=0;
+}
+
+# 2022-06-07
+# https://sqlite.org/forum/forumpost/323f86cc30
+reset_db
+do_execsql_test join8-20000 {
+  CREATE TABLE t1(x TEXT);
+  INSERT INTO t1(x) VALUES('aaa');
+  CREATE VIEW v0(y) AS SELECT x FROM t1;
+  CREATE TABLE t2(z TEXT);
+} {}
+db null -
+do_execsql_test join8-20010 {
+  SELECT * FROM t2 JOIN v0 ON z<>'bbb' RIGHT JOIN t1 ON z<>'ccc';
+} {- - aaa}
+do_execsql_test join8-20020 {
+  SELECT * FROM t2 JOIN v0 ON z<>'bbb' RIGHT JOIN t1 ON z<>'ccc' ORDER BY z;
+} {- - aaa}
+do_execsql_test join8-20030 {
+  SELECT 99 as "m" FROM t2 JOIN v0 ON z<>'bbb' RIGHT JOIN t1 ON z<>'ccc';
+} {99}
+do_execsql_test join8-20040 {
+  SELECT 99 as "m" FROM t2 JOIN v0 ON z<>'bbb' RIGHT JOIN t1 ON z<>'ccc' ORDER BY z;
+} {99}
+do_execsql_test join8-20050 {
+  SELECT count(*)
+    FROM (SELECT 99 as "m" FROM t2 JOIN v0 ON z<>'' RIGHT JOIN t1 ON z<>'') AS "t3";
+} {1}
+do_execsql_test join8-20060 {
+  SELECT count(*) 
+    FROM (SELECT 99 as "m" FROM t2 JOIN v0 ON z<>'' RIGHT JOIN t1 ON z<>'' ORDER BY z) AS "t3";
+} {1}
+
+# 2022-06-10
+# https://sqlite.org/forum/forumpost/8e4c352937e82929
+#
+# Do not allow constant propagation between ON and WHERE clause terms.
+#
+reset_db
+do_execsql_test join8-21000 {
+  CREATE TABLE t1(a INT,b BOOLEAN);
+  CREATE TABLE t2(c INT);  INSERT INTO t2 VALUES(NULL);
+  CREATE TABLE t3(d INT);
+}
+do_execsql_test join8-21010 {
+  SELECT (b IS TRUE) FROM t1 JOIN t3 ON (b=TRUE) RIGHT JOIN t2 ON TRUE;
+} {0}
+do_execsql_test join8-22020 {
+  SELECT * FROM t1 JOIN t3 ON (b=TRUE) RIGHT JOIN t2 ON TRUE WHERE (b IS TRUE);
+} {}
+
+# 2022-06-10
+# https://sqlite.org/forum/forumpost/51e6959f61
+#
+# Restrictions on the usage of WHERE clause constraints by joins that are
+# involved with a RIGHT JOIN must also be applied to automatic indexes.
+#
+reset_db
+do_execsql_test join8-22000 {
+  CREATE TABLE t1(a INT);
+  CREATE TABLE t2(b INT);
+  CREATE TABLE t3(c TEXT);  INSERT INTO t3 VALUES('x');
+  CREATE TABLE t4(d TEXT);  INSERT INTO t4 VALUES('y');
+  SELECT 99
+    FROM t1
+         LEFT JOIN t2 ON true
+         RIGHT JOIN t3 ON true
+         RIGHT JOIN t4 ON true
+   WHERE a=b;
+} {}
+  
+
 finish_test
