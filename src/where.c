@@ -2196,12 +2196,18 @@ static void whereLoopClearUnion(sqlite3 *db, WhereLoop *p){
 }
 
 /*
-** Deallocate internal memory used by a WhereLoop object
+** Deallocate internal memory used by a WhereLoop object.  Leave the
+** object in an initialized state, as if it had been newly allocated.
 */
 static void whereLoopClear(sqlite3 *db, WhereLoop *p){
-  if( p->aLTerm!=p->aLTermSpace ) sqlite3DbFreeNN(db, p->aLTerm);
+  if( p->aLTerm!=p->aLTermSpace ){
+    sqlite3DbFreeNN(db, p->aLTerm);
+    p->aLTerm = p->aLTermSpace;
+    p->nLSlot = ArraySize(p->aLTermSpace);
+  }
   whereLoopClearUnion(db, p);
-  whereLoopInit(p);
+  p->nLTerm = 0;
+  p->wsFlags = 0;
 }
 
 /*
@@ -2225,7 +2231,9 @@ static int whereLoopResize(sqlite3 *db, WhereLoop *p, int n){
 */
 static int whereLoopXfer(sqlite3 *db, WhereLoop *pTo, WhereLoop *pFrom){
   whereLoopClearUnion(db, pTo);
-  if( whereLoopResize(db, pTo, pFrom->nLTerm) ){
+  if( pFrom->nLTerm > pTo->nLSlot
+   && whereLoopResize(db, pTo, pFrom->nLTerm)
+  ){
     memset(pTo, 0, WHERE_LOOP_XFER_SZ);
     return SQLITE_NOMEM_BKPT;
   }
@@ -2878,7 +2886,11 @@ static int whereLoopAddBtreeIndex(
     pNew->u.btree.nBtm = saved_nBtm;
     pNew->u.btree.nTop = saved_nTop;
     pNew->nLTerm = saved_nLTerm;
-    if( whereLoopResize(db, pNew, pNew->nLTerm+1) ) break; /* OOM */
+    if( pNew->nLTerm>=pNew->nLSlot
+     && whereLoopResize(db, pNew, pNew->nLTerm+1)
+    ){
+       break; /* OOM while trying to enlarge the pNew->aLTerm array */
+    }
     pNew->aLTerm[pNew->nLTerm++] = pTerm;
     pNew->prereq = (saved_prereq | pTerm->prereqRight) & ~pNew->maskSelf;
 
@@ -2971,38 +2983,39 @@ static int whereLoopAddBtreeIndex(
       if( scan.iEquiv>1 ) pNew->wsFlags |= WHERE_TRANSCONS;
     }else if( eOp & WO_ISNULL ){
       pNew->wsFlags |= WHERE_COLUMN_NULL;
-    }else if( eOp & (WO_GT|WO_GE) ){
-      testcase( eOp & WO_GT );
-      testcase( eOp & WO_GE );
-      pNew->wsFlags |= WHERE_COLUMN_RANGE|WHERE_BTM_LIMIT;
-      pNew->u.btree.nBtm = whereRangeVectorLen(
-          pParse, pSrc->iCursor, pProbe, saved_nEq, pTerm
-      );
-      pBtm = pTerm;
-      pTop = 0;
-      if( pTerm->wtFlags & TERM_LIKEOPT ){
-        /* Range constraints that come from the LIKE optimization are
-        ** always used in pairs. */
-        pTop = &pTerm[1];
-        assert( (pTop-(pTerm->pWC->a))<pTerm->pWC->nTerm );
-        assert( pTop->wtFlags & TERM_LIKEOPT );
-        assert( pTop->eOperator==WO_LT );
-        if( whereLoopResize(db, pNew, pNew->nLTerm+1) ) break; /* OOM */
-        pNew->aLTerm[pNew->nLTerm++] = pTop;
-        pNew->wsFlags |= WHERE_TOP_LIMIT;
-        pNew->u.btree.nTop = 1;
-      }
     }else{
-      assert( eOp & (WO_LT|WO_LE) );
-      testcase( eOp & WO_LT );
-      testcase( eOp & WO_LE );
-      pNew->wsFlags |= WHERE_COLUMN_RANGE|WHERE_TOP_LIMIT;
-      pNew->u.btree.nTop = whereRangeVectorLen(
+      int nVecLen = whereRangeVectorLen(
           pParse, pSrc->iCursor, pProbe, saved_nEq, pTerm
       );
-      pTop = pTerm;
-      pBtm = (pNew->wsFlags & WHERE_BTM_LIMIT)!=0 ?
-                     pNew->aLTerm[pNew->nLTerm-2] : 0;
+      if( eOp & (WO_GT|WO_GE) ){
+        testcase( eOp & WO_GT );
+        testcase( eOp & WO_GE );
+        pNew->wsFlags |= WHERE_COLUMN_RANGE|WHERE_BTM_LIMIT;
+        pNew->u.btree.nBtm = nVecLen;
+        pBtm = pTerm;
+        pTop = 0;
+        if( pTerm->wtFlags & TERM_LIKEOPT ){
+          /* Range constraints that come from the LIKE optimization are
+          ** always used in pairs. */
+          pTop = &pTerm[1];
+          assert( (pTop-(pTerm->pWC->a))<pTerm->pWC->nTerm );
+          assert( pTop->wtFlags & TERM_LIKEOPT );
+          assert( pTop->eOperator==WO_LT );
+          if( whereLoopResize(db, pNew, pNew->nLTerm+1) ) break; /* OOM */
+          pNew->aLTerm[pNew->nLTerm++] = pTop;
+          pNew->wsFlags |= WHERE_TOP_LIMIT;
+          pNew->u.btree.nTop = 1;
+        }
+      }else{
+        assert( eOp & (WO_LT|WO_LE) );
+        testcase( eOp & WO_LT );
+        testcase( eOp & WO_LE );
+        pNew->wsFlags |= WHERE_COLUMN_RANGE|WHERE_TOP_LIMIT;
+        pNew->u.btree.nTop = nVecLen;
+        pTop = pTerm;
+        pBtm = (pNew->wsFlags & WHERE_BTM_LIMIT)!=0 ?
+                       pNew->aLTerm[pNew->nLTerm-2] : 0;
+      }
     }
 
     /* At this point pNew->nOut is set to the number of rows expected to
@@ -4173,7 +4186,13 @@ static int whereLoopAddAll(WhereLoopBuilder *pBuilder){
 
   /* Loop over the tables in the join, from left to right */
   pNew = pBuilder->pNew;
-  whereLoopInit(pNew);
+
+  /* Verify that pNew has already been initialized */
+  assert( pNew->nLTerm==0 );
+  assert( pNew->wsFlags==0 );
+  assert( pNew->nLSlot>=ArraySize(pNew->aLTermSpace) );
+  assert( pNew->aLTerm!=0 );
+
   pBuilder->iPlanLimit = SQLITE_QUERY_PLANNER_LIMIT;
   for(iTab=0, pItem=pTabList->a; pItem<pEnd; iTab++, pItem++){
     Bitmask mUnusable = 0;
@@ -4769,9 +4788,9 @@ static int wherePathSolver(WhereInfo *pWInfo, LogEst nRowEst){
         LogEst nOut;                      /* Rows visited by (pFrom+pWLoop) */
         LogEst rCost;                     /* Cost of path (pFrom+pWLoop) */
         LogEst rUnsorted;                 /* Unsorted cost of (pFrom+pWLoop) */
-        i8 isOrdered = pFrom->isOrdered;  /* isOrdered for (pFrom+pWLoop) */
+        i8 isOrdered;                     /* isOrdered for (pFrom+pWLoop) */
         Bitmask maskNew;                  /* Mask of src visited by (..) */
-        Bitmask revMask = 0;              /* Mask of rev-order loops for (..) */
+        Bitmask revMask;                  /* Mask of rev-order loops for (..) */
 
         if( (pWLoop->prereq & ~pFrom->maskLoop)!=0 ) continue;
         if( (pWLoop->maskSelf & pFrom->maskLoop)!=0 ) continue;
@@ -4790,7 +4809,9 @@ static int wherePathSolver(WhereInfo *pWInfo, LogEst nRowEst){
         rUnsorted = sqlite3LogEstAdd(rUnsorted, pFrom->rUnsorted);
         nOut = pFrom->nRow + pWLoop->nOut;
         maskNew = pFrom->maskLoop | pWLoop->maskSelf;
+        isOrdered = pFrom->isOrdered;
         if( isOrdered<0 ){
+          revMask = 0;
           isOrdered = wherePathSatisfiesOrderBy(pWInfo,
                        pWInfo->pOrderBy, pFrom, pWInfo->wctrlFlags,
                        iLoop, pWLoop, &revMask);
