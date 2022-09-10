@@ -1918,8 +1918,9 @@ int sqlite3_win32_set_directory8(
   const char *zValue  /* New value for directory being set or reset */
 ){
   char **ppDirectory = 0;
+  int rc;
 #ifndef SQLITE_OMIT_AUTOINIT
-  int rc = sqlite3_initialize();
+  rc = sqlite3_initialize();
   if( rc ) return rc;
 #endif
   sqlite3_mutex_enter(sqlite3MutexAlloc(SQLITE_MUTEX_STATIC_TEMPDIR));
@@ -5762,7 +5763,8 @@ static int winFullPathname(
   char *zFull                   /* Output buffer */
 ){
   int rc;
-  sqlite3_mutex *pMutex = sqlite3MutexAlloc(SQLITE_MUTEX_STATIC_TEMPDIR);
+  MUTEX_LOGIC( sqlite3_mutex *pMutex; )
+  MUTEX_LOGIC( pMutex = sqlite3MutexAlloc(SQLITE_MUTEX_STATIC_TEMPDIR); )
   sqlite3_mutex_enter(pMutex);
   rc = winFullPathnameNoMutex(pVfs, zRelative, nFull, zFull);
   sqlite3_mutex_leave(pMutex);

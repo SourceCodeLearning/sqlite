@@ -1,5 +1,5 @@
-C Ensure\sthe\sPager.journalOff\svariable\sis\szeroed\sif\san\serror\soccurs\swhile\swriting\sthe\sinitial\sheader\sto\sthe\sjournal\sfile.
-D 2022-09-02T21:19:24.442
+C Fix\sharmless\scompiler\swarning\sseen\swith\sMSVC.
+D 2022-09-09T17:50:29.375
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -573,14 +573,14 @@ F src/os.h 1ff5ae51d339d0e30d8a9d814f4b8f8e448169304d83a7ed9db66a65732f3e63
 F src/os_common.h b2f4707a603e36811d9b1a13278bffd757857b85
 F src/os_setup.h 0dbaea40a7d36bf311613d31342e0b99e2536586
 F src/os_unix.c 102f7e5c5b59c18ea3dbc929dc3be8acb3afc0e0b6ad572e032335c9c27f44f1
-F src/os_win.c d55025aeb5b36b5d92d7c09fe709edaf2be901420782540ba4adad86729636a0
+F src/os_win.c 8d129ae3e59e0fa900e20d0ad789e96f2e08177f0b00b53cdda65c40331e0902
 F src/os_win.h 7b073010f1451abe501be30d12f6bc599824944a
 F src/pager.c 6176d9752eb580419e8fef4592dc417a6b00ddfd43ee22f818819bf8840ceee8
 F src/pager.h f82e9844166e1585f5786837ddc7709966138ced17f568c16af7ccf946c2baa3
 F src/parse.y 8e67d820030d2655b9942ffe61c1e7e6b96cea2f2f72183533299393907d0564
-F src/pcache.c 22a6ebe498d1d26c85fd1e3bcb246d97b882c060027c1e1688fbea905f5ac3cf
+F src/pcache.c f4268f7f73c6a3db12ce22fd25bc68dc42315d19599414ab1207d7cf32f79197
 F src/pcache.h 4f87acd914cef5016fae3030343540d75f5b85a1877eed1a2a19b9f284248586
-F src/pcache1.c 849a26ea9dc1e6a176b75dc576672a598170b0b46aeef87a981dd25e0af0ccf9
+F src/pcache1.c dee95e3cd2b61e6512dc814c5ab76d5eb36f0bfc9441dbb4260fccc0d12bbddc
 F src/pragma.c 9bf7d8a2a9ad3bc36df3ec0d61817a44c38a1da527d59c26c203047f906e334a
 F src/pragma.h e690a356c18e98414d2e870ea791c1be1545a714ba623719deb63f7f226d8bb7
 F src/prepare.c 971d5819a4bda88038c2283d71fc0a2974ffc3dd480f9bd941341017abacfd1b
@@ -1942,6 +1942,7 @@ F tool/mksqlite3h.tcl 1f5e4a1dbbbc43c83cc6e74fe32c6c620502240b66c7c0f33a51378e78
 F tool/mksqlite3internalh.tcl eb994013e833359137eb53a55acdad0b5ae1049b
 F tool/mkvsix.tcl b9e0777a213c23156b6542842c238479e496ebf5
 F tool/offsets.c 8ed2b344d33f06e71366a9b93ccedaa38c096cc1dbd4c3c26ad08c6115285845
+F tool/omittest-msvc.tcl d6b8f501ac1d7798c4126065030f89812379012cad98a1735d6d7221492abc08
 F tool/omittest.tcl 3bc9609aceea871e1ca6ed6749df9ce79b89369d22b492f6ce6078f40647cc3f
 F tool/opcodesum.tcl 740ed206ba8c5040018988129abbf3089a0ccf4a
 F tool/pagesig.c ff0ca355fd3c2398e933da5e22439bbff89b803b
@@ -1999,8 +2000,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 54251f81ebc43839cc97f91d2df4c320c1b96b5690cc11ce45b60c087c9becd6
-R 87dafa73318986b955e7b84411151a61
-U dan
-Z acee053f656d75b425260930781b7440
+P 42105eb43a916a7cd839fa6c582eaffaef17f50b23c3e05142400c379feb73c7
+R fd5aff581be86e15a91eeaa3f20f7912
+U mistachkin
+Z bd0ebecde4dd76aef42010e0aed5496b
 # Remove this line to create a well-formed Fossil manifest.
