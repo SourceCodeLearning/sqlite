@@ -82,12 +82,12 @@
       const cbReverseKey = 'tester1:cb-log-reverse';
       const cbReverseIt = ()=>{
         logTarget.classList[cbReverse.checked ? 'add' : 'remove']('reverse');
-        localStorage.setItem(cbReverseKey, cbReverse.checked ? 1 : 0);
+        //localStorage.setItem(cbReverseKey, cbReverse.checked ? 1 : 0);
       };
-      cbReverse.addEventListener('change',cbReverseIt,true);
-      if(localStorage.getItem(cbReverseKey)){
+      cbReverse.addEventListener('change', cbReverseIt, true);
+      /*if(localStorage.getItem(cbReverseKey)){
         cbReverse.checked = !!(+localStorage.getItem(cbReverseKey));
-      }
+      }*/
       cbReverseIt();
     }else{ /* Worker thread */
       console.log("Running in a Worker thread.");
@@ -375,6 +375,19 @@
             assert(s!==u).
             assert(w.heapForSize(u.constructor) === u);
         }
+      }
+
+      // isPtr32()
+      {
+        const ip = w.isPtr32;
+        T.assert(ip(0))
+          .assert(!ip(-1))
+          .assert(!ip(1.1))
+          .assert(!ip(0xffffffff))
+          .assert(ip(0x7fffffff))
+          .assert(!ip())
+          .assert(!ip(null)/*might change: under consideration*/)
+        ;
       }
 
       //log("jstrlen()...");
@@ -1056,19 +1069,65 @@
   ////////////////////////////////////////////////////////////////////
   ;/*end of C/WASM utils checks*/
 
+  T.g('sqlite3_randomness()')
+    .t('To memory buffer', function(sqlite3){
+      const stack = wasm.pstack.pointer;
+      try{
+        const n = 520;
+        const p = wasm.pstack.alloc(n);
+        T.assert(0===wasm.getMemValue(p))
+          .assert(0===wasm.getMemValue(p+n-1));
+        T.assert(undefined === capi.sqlite3_randomness(n - 10, p));
+        let j, check = 0;
+        const heap = wasm.heap8u();
+        for(j = 0; j < 10 && 0===check; ++j){
+          check += heap[p + j];
+        }
+        T.assert(check > 0);
+        check = 0;
+        // Ensure that the trailing bytes were not modified...
+        for(j = n - 10; j < n && 0===check; ++j){
+          check += heap[p + j];
+        }
+        T.assert(0===check);
+      }finally{
+        wasm.pstack.restore(stack);
+      }
+    })
+    .t('To byte array', function(sqlite3){
+      const ta = new Uint8Array(117);
+      let i, n = 0;
+      for(i=0; i<ta.byteLength && 0===n; ++i){
+        n += ta[i];
+      }
+      T.assert(0===n)
+        .assert(ta === capi.sqlite3_randomness(ta));
+      for(i=ta.byteLength-10; i<ta.byteLength && 0===n; ++i){
+        n += ta[i];
+      }
+      T.assert(n>0);
+      const t0 = new Uint8Array(0);
+      T.assert(t0 === capi.sqlite3_randomness(t0),
+               "0-length array is a special case");
+    })
+  ;/*end sqlite3_randomness() checks*/
+
   ////////////////////////////////////////////////////////////////////////
   T.g('sqlite3.oo1')
     .t('Create db', function(sqlite3){
-      const db = this.db = new sqlite3.oo1.DB();
+      const dbFile = '/tester1.db';
+      sqlite3.capi.wasm.sqlite3_wasm_vfs_unlink(0, dbFile);
+      const db = this.db = new sqlite3.oo1.DB(dbFile);
       T.assert(Number.isInteger(db.pointer)).
         mustThrowMatching(()=>db.pointer=1, /read-only/).
         assert(0===sqlite3.capi.sqlite3_extended_result_codes(db.pointer,1)).
         assert('main'===db.dbName(0));
-
       // Custom db error message handling via sqlite3_prepare_v2/v3()
       let rc = capi.sqlite3_prepare_v3(db.pointer, {/*invalid*/}, -1, 0, null, null);
       T.assert(capi.SQLITE_MISUSE === rc)
-        .assert(0 === capi.sqlite3_errmsg(db.pointer).indexOf("Invalid SQL"));
+        .assert(0 === capi.sqlite3_errmsg(db.pointer).indexOf("Invalid SQL"))
+        .assert(dbFile === db.dbFilename())
+        .assert(!db.dbFilename('nope'));
     })
 
   ////////////////////////////////////////////////////////////////////
@@ -1146,7 +1205,6 @@
         .assert(pVfsDb > 0)
         .assert(pVfsMem !== pVfsDflt
                 /* memdb lives on top of the default vfs */)
-        .assert(':memory:' === db.filename)
         .assert(pVfsDb === pVfsDflt || pVfsdb === pVfsMem)
       ;
       /*const vMem = new capi.sqlite3_vfs(pVfsMem),

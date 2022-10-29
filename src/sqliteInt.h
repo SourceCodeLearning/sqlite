@@ -1255,6 +1255,7 @@ typedef struct With With;
 #define MASKBIT32(n)  (((unsigned int)1)<<(n))
 #define SMASKBIT32(n) ((n)<=31?((unsigned int)1)<<(n):0)
 #define ALLBITS       ((Bitmask)-1)
+#define TOPBIT        (((Bitmask)1)<<(BMS-1))
 
 /* A VList object records a mapping between parameters/variables/wildcards
 ** in the SQL statement (such as $abc, @pqr, or :xyz) and the integer
@@ -2579,9 +2580,21 @@ struct UnpackedRecord {
 ** The Index.onError field determines whether or not the indexed columns
 ** must be unique and what to do if they are not.  When Index.onError=OE_None,
 ** it means this is not a unique index.  Otherwise it is a unique index
-** and the value of Index.onError indicate the which conflict resolution
-** algorithm to employ whenever an attempt is made to insert a non-unique
+** and the value of Index.onError indicates which conflict resolution
+** algorithm to employ when an attempt is made to insert a non-unique
 ** element.
+**
+** The colNotIdxed bitmask is used in combination with SrcItem.colUsed
+** for a fast test to see if an index can serve as a covering index.
+** colNotIdxed has a 1 bit for every column of the original table that
+** is *not* available in the index.  Thus the expression
+** "colUsed & colNotIdxed" will be non-zero if the index is not a
+** covering index.  The most significant bit of of colNotIdxed will always
+** be true (note-20221022-a).  If a column beyond the 63rd column of the
+** table is used, the "colUsed & colNotIdxed" test will always be non-zero
+** and we have to assume either that the index is not covering, or use
+** an alternative (slower) algorithm to determine whether or not
+** the index is covering.
 **
 ** While parsing a CREATE TABLE or CREATE INDEX statement in order to
 ** generate VDBE code (as opposed to parsing one read from an sqlite_schema
@@ -2628,7 +2641,7 @@ struct Index {
   tRowcnt *aiRowEst;       /* Non-logarithmic stat1 data for this index */
   tRowcnt nRowEst0;        /* Non-logarithmic number of rows in the index */
 #endif
-  Bitmask colNotIdxed;     /* 0 for unindexed columns in pTab */
+  Bitmask colNotIdxed;     /* Unindexed columns in pTab */
 };
 
 /*
@@ -3081,6 +3094,14 @@ struct IdList {
 ** The SrcItem object represents a single term in the FROM clause of a query.
 ** The SrcList object is mostly an array of SrcItems.
 **
+** The jointype starts out showing the join type between the current table
+** and the next table on the list.  The parser builds the list this way.
+** But sqlite3SrcListShiftJoinType() later shifts the jointypes so that each
+** jointype expresses the join between the table and the previous table.
+**
+** In the colUsed field, the high-order bit (bit 63) is set if the table
+** contains more than 63 columns and the 64-th or later column is used.
+**
 ** Union member validity:
 **
 **    u1.zIndexedBy          fg.isIndexedBy && !fg.isTabFunc
@@ -3120,14 +3141,14 @@ struct SrcItem {
     Expr *pOn;        /* fg.isUsing==0 =>  The ON clause of a join */
     IdList *pUsing;   /* fg.isUsing==1 =>  The USING clause of a join */
   } u3;
-  Bitmask colUsed;  /* Bit N (1<<N) set if column N of pTab is used */
+  Bitmask colUsed;  /* Bit N set if column N used. Details above for N>62 */
   union {
     char *zIndexedBy;    /* Identifier from "INDEXED BY <zIndex>" clause */
     ExprList *pFuncArg;  /* Arguments to table-valued-function */
   } u1;
   union {
     Index *pIBIndex;  /* Index structure corresponding to u1.zIndexedBy */
-    CteUse *pCteUse;  /* CTE Usage info info fg.isCte is true */
+    CteUse *pCteUse;  /* CTE Usage info when fg.isCte is true */
   } u2;
 };
 
@@ -3141,23 +3162,11 @@ struct OnOrUsing {
 };
 
 /*
-** The following structure describes the FROM clause of a SELECT statement.
-** Each table or subquery in the FROM clause is a separate element of
-** the SrcList.a[] array.
+** This object represents one or more tables that are the source of
+** content for an SQL statement.  For example, a single SrcList object
+** is used to hold the FROM clause of a SELECT statement.  SrcList also
+** represents the target tables for DELETE, INSERT, and UPDATE statements.
 **
-** With the addition of multiple database support, the following structure
-** can also be used to describe a particular table such as the table that
-** is modified by an INSERT, DELETE, or UPDATE statement.  In standard SQL,
-** such a table must be a simple name: ID.  But in SQLite, the table can
-** now be identified by a database name, a dot, then the table name: ID.ID.
-**
-** The jointype starts out showing the join type between the current table
-** and the next table on the list.  The parser builds the list this way.
-** But sqlite3SrcListShiftJoinType() later shifts the jointypes so that each
-** jointype expresses the join between the table and the previous table.
-**
-** In the colUsed field, the high-order bit (bit 63) is set if the table
-** contains more than 63 columns and the 64-th or later column is used.
 */
 struct SrcList {
   int nSrc;        /* Number of tables or subqueries in the FROM clause */
@@ -4083,15 +4092,15 @@ struct Walker {
     struct RefSrcList *pRefSrcList;           /* sqlite3ReferencesSrcList() */
     int *aiCol;                               /* array of column indexes */
     struct IdxCover *pIdxCover;               /* Check for index coverage */
-    struct IdxExprTrans *pIdxTrans;           /* Convert idxed expr to column */
     ExprList *pGroupBy;                       /* GROUP BY clause */
     Select *pSelect;                          /* HAVING to WHERE clause ctx */
     struct WindowRewrite *pRewrite;           /* Window rewrite context */
     struct WhereConst *pConst;                /* WHERE clause constants */
     struct RenameCtx *pRename;                /* RENAME COLUMN context */
     struct Table *pTab;                       /* Table of generated column */
+    struct CoveringIndexCheck *pCovIdxCk;     /* Check for covering index */
     SrcItem *pSrcItem;                        /* A single FROM clause item */
-    DbFixer *pFix;
+    DbFixer *pFix;                            /* See sqlite3FixSelect() */
   } u;
 };
 
@@ -5043,7 +5052,6 @@ extern const unsigned char sqlite3OpcodeProperty[];
 extern const char sqlite3StrBINARY[];
 extern const unsigned char sqlite3StdTypeLen[];
 extern const char sqlite3StdTypeAffinity[];
-extern const char sqlite3StdTypeMap[];
 extern const char *sqlite3StdType[];
 extern const unsigned char sqlite3UpperToLower[];
 extern const unsigned char *sqlite3aLTb;
