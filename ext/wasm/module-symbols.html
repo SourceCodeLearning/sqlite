@@ -4,18 +4,35 @@
     <meta charset="utf-8">
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
     <link rel="shortcut icon" href="data:image/x-icon;," type="image/x-icon">
-    <script src="jswasm/sqlite3.js"></script>
     <title>sqlite3 Module Symbols</title>
+    <style>
+      body {
+          font-size: 12.5pt;
+          padding-bottom: 1em;
+      }
+      </style>
   </head>
   <body>
-<div class="fossil-doc" data-title="sqlite3 Module Symbols">
+<div class="fossil-doc" data-title="sqlite3 Module Symbols"><!-- EXTRACT_BEGIN -->
+<!--
+    The part of this doc wrapped in div.fossil-doc gets snipped out
+    from the canonical copy in the main tree (ext/wasm/module-symbols.html)
+    and added to the wasm docs repository, where it's served from
+    fossil.
+-->
   <style>
     .pseudolist {
         column-count: auto;
-        column-width: 20rem;
+        column-width: 12rem;
         column-gap: 1.5em;
-        width: 95%;
+        width: 90%;
         margin: auto;
+    }
+    .pseudolist.wide {
+        column-width: 21rem;
+    }
+    .pseudolist.wide2 {
+        column-width: 25rem;
     }
     .pseudolist > span {
         font-family: monospace;
@@ -45,8 +62,13 @@
         
     }
     .func-wasm::after {
-        content: "*";
-        color: blue;
+        content: "WASM";
+        color: saddlebrown;
+        /* ^^^^ the color must be legible in both "bright" and "dark"
+           s    ite themes. */
+        font-size: 0.65em;
+    /* baseline-shift: super; */
+        vertical-align: super;
     }
   </style>
   <p id='module-load-status'><strong>Loading WASM module...</strong>
@@ -85,18 +107,18 @@
     <p>Jump to...</p>
     <ul>
       <li><a href='#sqlite3-namespace'><code>sqlite3</code> namespace</a></li>
-      <li><a href='#sqlite3-version'><code>sqlite3.version</code></a></li>
+      <li><a href='#sqlite3-version'><code>sqlite3.version</code> object</a></li>
       <li><a href='#sqlite3-functions'><code>sqlite3_...()</code> functions</a></li>
-      <li><a href='#sqlite3-constants'><code>SQLITE_...</code> functions</a></li>
-      <li><a href='#sqlite3.oo1'><code>sqlite3.oo1</code></a>
+      <li><a href='#sqlite3-constants'><code>SQLITE_...</code> constants</a></li>
+      <li><a href='#sqlite3.oo1'><code>sqlite3.oo1</code> namespace</a>
         <!--ul>
           <li><a href='#sqlite3.oo1.DB'><code>sqlite3.oo1.DB</code></a></li>
           <li><a href='#sqlite3.oo1.Stmt'><code>sqlite3.oo1.Stmt</code></a></li>
         </ul-->
       </li>
-      <li><a href='#sqlite3.capi.wasm'><code>sqlite3.capi.wasm</code></a></li>
-      <li><a href='#sqlite3.capi.wasm.pstack'><code>sqlite3.capi.wasm.pstack</code></a></li>
-      <li><a href='#compile-options'>Compilation options used in this module build.</a></li>
+      <li><a href='#sqlite3.wasm'><code>sqlite3.wasm</code> namespace</a></li>
+      <li><a href='#sqlite3.wasm.pstack'><code>sqlite3.wasm.pstack</code> namespace</a></li>
+      <li><a href='#compile-options'>Compilation options used in this module build</a></li>
     </ul>
 
     <a id="sqlite3-namespace"></a>
@@ -107,20 +129,20 @@
     <div id='list-namespace' class='pseudolist'></div>
 
     <a id="sqlite3-version"></a>
-    <h1><code>sqlite3.version</code></h1>
+    <h1><code>sqlite3.version</code> Object</h1>
     <p>
       The <code>sqlite3.version</code> object exposes the following...
     </p>
-    <div id='list-version' class='pseudolist wrap-anywhere'></div>
+    <div id='list-version' class='pseudolist wide wrap-anywhere'></div>
     
     <a id="sqlite3-functions"></a>
     <h1><code>sqlite3_...()</code> Function List</h1>
     
-    <p>The <code>sqlite3.capi</code> object exposes the following
+    <p>The <code>sqlite3.capi</code> namespace exposes the following
       <a href='https://sqlite.org/c3ref/funclist.html'><code>sqlite3_...()</code>
         functions</a>...
     </p>
-    <div id='list-functions' class='pseudolist'></div>
+    <div id='list-functions' class='pseudolist wide'></div>
     <p>
       <code class='func-wasm'></code> = function is specific to the JS/WASM
       bindings, not part of the C API.
@@ -129,31 +151,31 @@
     <a id="sqlite3-constants"></a>
     <h1><code>SQLITE_...</code> Constants</h1>
 
-    <p>The <code>sqlite3.capi</code> object exposes the following
+    <p>The <code>sqlite3.capi</code> namespace exposes the following
       <a href='https://sqlite.org/c3ref/constlist.html'><code>SQLITE_...</code>
         constants</a>...
     </p>
-    <div id='list-constants' class='pseudolist'></div>
+    <div id='list-constants' class='pseudolist wide'></div>
 
     <a id="sqlite3.oo1"></a>
-    <h1><code>sqlite3.oo1</code></h1>
+    <h1><code>sqlite3.oo1</code> Namespace</h1>
     <p>
-      The <code>sqlite3.oo1</code> object exposes the following...
+      The <code>sqlite3.oo1</code> namespace exposes the following...
     </p>
     <div id='list-oo1' class='pseudolist'></div>
 
-    <a id="sqlite3.capi.wasm"></a>
-    <h1><code>sqlite3.capi.wasm</code></h1>
+    <a id="sqlite3.wasm"></a>
+    <h1><code>sqlite3.wasm</code> Namespace</h1>
     <p>
-      The <code>sqlite3.capi.wasm</code> object exposes the
+      The <code>sqlite3.wasm</code> namespace exposes the
       following...
     </p>
     <div id='list-wasm' class='pseudolist'></div>
 
-    <a id="sqlite3.capi.wasm.pstack"></a>
-    <h1><code>sqlite3.capi.wasm.pstack</code></h1>
+    <a id="sqlite3.wasm.pstack"></a>
+    <h1><code>sqlite3.wasm.pstack</code> Namespace</h1>
     <p>
-      The <code>sqlite3.capi.wasm.pstack</code> object exposes the
+      The <code>sqlite3.wasm.pstack</code> namespace exposes the
       following...
     </p>
     <div id='list-wasm-pstack' class='pseudolist'></div>
@@ -161,11 +183,15 @@
     <a id="compile-options"></a>
     <h1>Compilation Options</h1>
     <p>
-      Compilation options used in this build of <code>sqlite3.wasm</code>...
+      <code>SQLITE_...</code> compilation options used in this build
+      of <code>sqlite3.wasm</code>...
     </p>
-    <div id='list-compile-options' class='pseudolist'></div>
+    <div id='list-compile-options' class='pseudolist wide2'></div>
 
   </div><!-- .initially-hidden -->
+  <script src="jswasm/sqlite3.js">/* This tag MUST be in side the
+  fossil-doc block so that this part can work without modification in
+  the wasm docs repo.  */</script>
   <script>(async function(){
     const eNew = (tag,parent)=>{
         const e = document.createElement(tag);
@@ -212,7 +238,7 @@
     const renderIt = async function(sqlite3){
         self.sqlite3 = sqlite3;
         console.warn("sqlite3 installed as global symbol self.sqlite3.");
-        const capi = sqlite3.capi;
+        const capi = sqlite3.capi, wasm = sqlite3.wasm;
         const cmpIcase = (a,b)=>a.toLowerCase().localeCompare(b.toLowerCase());
         const renderX = function(tgtElem, container, keys){
             for(const k of keys.sort(cmpIcase)){
@@ -253,17 +279,17 @@
 
         const excludeWasm = ['ctype'];
         renderX(E('#list-wasm'),
-                capi.wasm,
-                Object.keys(capi.wasm)
-                .filter((v)=>{
+                wasm, Object.keys(wasm).filter((v)=>{
                     return !v.startsWith('sqlite3_wasm_')
                         && excludeWasm.indexOf(v)<0;
                 }));
-        const psKeys = Object.keys(capi.wasm.pstack);
+        const psKeys = Object.keys(wasm.pstack);
         psKeys.push('pointer','quota','remaining');
-        renderX(E('#list-wasm-pstack'), capi.wasm.pstack, psKeys);
+        renderX(E('#list-wasm-pstack'), wasm.pstack, psKeys);
 
-        const cou = capi.wasm.compileOptionUsed();
+        const cou = wasm.compileOptionUsed();
+        //const cou2 = Object.create(null);
+        //Object.entries(cou).forEach((e)=>cou2['SQLITE_'+e[0]] = e[1]);
         renderX(E('#list-compile-options'), cou, Object.keys(cou));
     };
 
@@ -303,5 +329,5 @@
     }/*myModule*/;
     self.sqlite3InitModule(myModule).then(renderIt);
 })();</script>
-</div><!-- .fossil-doc -->
+</div><!-- .fossil-doc EXTRACT_END -->
 </body></html>

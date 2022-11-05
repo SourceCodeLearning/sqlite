@@ -20,8 +20,8 @@ self.sqlite3ApiBootstrap.initializers.push(function(sqlite3){
   'use strict';
   const toss = (...args)=>{throw new Error(args.join(' '))};
   const toss3 = sqlite3.SQLite3Error.toss;
-  const capi = sqlite3.capi, wasm = capi.wasm, util = capi.util;
-  self.WhWasmUtilInstaller(capi.wasm);
+  const capi = sqlite3.capi, wasm = sqlite3.wasm, util = sqlite3.util;
+  self.WhWasmUtilInstaller(wasm);
   delete self.WhWasmUtilInstaller;
 
   /**
@@ -51,8 +51,8 @@ self.sqlite3ApiBootstrap.initializers.push(function(sqlite3){
     });
   }
 
-  if(1){/* Convert Arrays and certain TypedArrays to strings for
-           'flexible-string'-type arguments */
+  {/* Convert Arrays and certain TypedArrays to strings for
+      'flexible-string'-type arguments */
     const xString = wasm.xWrap.argAdapter('string');
     wasm.xWrap.argAdapter(
       'flexible-string', (v)=>xString(util.flexibleString(v))
@@ -88,7 +88,7 @@ self.sqlite3ApiBootstrap.initializers.push(function(sqlite3){
       capi[e[0]] = wasm.xWrap.apply(null, e);
     }
     for(const e of wasm.bindingSignatures.wasm){
-      capi.wasm[e[0]] = wasm.xWrap.apply(null, e);
+      wasm[e[0]] = wasm.xWrap.apply(null, e);
     }
 
     /* For C API functions which cannot work properly unless
@@ -109,7 +109,7 @@ self.sqlite3ApiBootstrap.initializers.push(function(sqlite3){
     delete wasm.bindingSignatures;
 
     if(wasm.exports.sqlite3_wasm_db_error){
-      util.sqlite3_wasm_db_error = capi.wasm.xWrap(
+      util.sqlite3_wasm_db_error = wasm.xWrap(
         'sqlite3_wasm_db_error', 'int', 'sqlite3*', 'int', 'string'
       );
     }else{
@@ -141,7 +141,7 @@ self.sqlite3ApiBootstrap.initializers.push(function(sqlite3){
   const __dbArgcMismatch = (pDb,f,n)=>{
     return sqlite3.util.sqlite3_wasm_db_error(pDb, capi.SQLITE_MISUSE,
                                               f+"() requires "+n+" argument"+
-                                              (1===n?'':'s')+".");
+                                              (1===n?"":'s')+".");
   };
 
   /**
@@ -158,7 +158,7 @@ self.sqlite3ApiBootstrap.initializers.push(function(sqlite3){
       n = v.byteLength;
       v = util.typedArrayToString(v);
     }else if(Array.isArray(v)){
-      v = v.join('');
+      v = v.join("");
       n = -1;
     }
     return [v, n];
@@ -176,7 +176,6 @@ self.sqlite3ApiBootstrap.initializers.push(function(sqlite3){
       }
       /* Wrap the callback in a WASM-bound function and convert the callback's
          `(char**)` arguments to arrays of strings... */
-      const wasm = capi.wasm;
       const cbwrap = function(pVoid, nCols, pColVals, pColNames){
         let rc = capi.SQLITE_ERROR;
         try {
@@ -399,7 +398,6 @@ self.sqlite3ApiBootstrap.initializers.push(function(sqlite3){
         return __dbArgcMismatch(pDb,"sqlite3_create_function_v2",f.length);
       }
       /* Wrap the callbacks in a WASM-bound functions... */
-      const wasm = capi.wasm;
       const uninstall = [/*funcs to uninstall on error*/];
       let rc;
       try{
@@ -441,7 +439,6 @@ self.sqlite3ApiBootstrap.initializers.push(function(sqlite3){
         return __dbArgcMismatch(pDb,"sqlite3_create_window_function",f.length);
       }
       /* Wrap the callbacks in a WASM-bound functions... */
-      const wasm = capi.wasm;
       const uninstall = [/*funcs to uninstall on error*/];
       let rc;
       try{
@@ -637,7 +634,13 @@ self.sqlite3ApiBootstrap.initializers.push(function(sqlite3){
       const kvvfsStorage = (zClass)=>
             ((115/*=='s'*/===wasm.getMemValue(zClass))
              ? sessionStorage : localStorage);
-      
+
+      /**
+         Implementations for members of the object referred to by
+         sqlite3_wasm_kvvfs_methods(). We swap out the native
+         implementations with these, which use localStorage or
+         sessionStorage for their backing store.
+      */
       const kvvfsImpls = {
         xRead: (zClass, zKey, zBuf, nBuf)=>{
           const stack = pstack.pointer,
@@ -699,7 +702,7 @@ self.sqlite3ApiBootstrap.initializers.push(function(sqlite3){
           }
         }
       }/*kvvfsImpls*/;
-      for(let k of Object.keys(kvvfsImpls)){
+      for(const k of Object.keys(kvvfsImpls)){
         kvvfsMethods[kvvfsMethods.memberKey(k)] =
           wasm.installFunction(
             kvvfsMethods.memberSignature(k),
