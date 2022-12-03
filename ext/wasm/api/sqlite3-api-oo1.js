@@ -201,9 +201,8 @@ self.sqlite3ApiBootstrap.initializers.push(function(sqlite3){
   */
   dbCtorHelper.normalizeArgs = function(filename=':memory:',flags = 'c',vfs = null){
     const arg = {};
-    if(1===arguments.length && 'object'===typeof arguments[0]){
-      const x = arguments[0];
-      Object.keys(x).forEach((k)=>arg[k] = x[k]);
+    if(1===arguments.length && arguments[0] && 'object'===typeof arguments[0]){
+      Object.assign(arg, arguments[0]);
       if(undefined===arg.flags) arg.flags = 'c';
       if(undefined===arg.vfs) arg.vfs = null;
       if(undefined===arg.filename) arg.filename = ':memory:';
@@ -1760,10 +1759,6 @@ self.sqlite3ApiBootstrap.initializers.push(function(sqlite3){
 
   /** The OO API's public namespace. */
   sqlite3.oo1 = {
-    version: {
-      lib: capi.sqlite3_libversion(),
-      ooApi: "0.1"
-    },
     DB,
     Stmt
   }/*oo1 object*/;
