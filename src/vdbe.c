@@ -371,6 +371,10 @@ static void applyNumericAffinity(Mem *pRec, int bTryForInt){
 **    always preferred, even if the affinity is REAL, because
 **    an integer representation is more space efficient on disk.
 **
+** SQLITE_AFF_FLEXNUM:
+**    If the value is text, then try to convert it into a number of
+**    some kind (integer or real) but do not make any other changes.
+**
 ** SQLITE_AFF_TEXT:
 **    Convert pRec to a text representation.
 **
@@ -385,11 +389,11 @@ static void applyAffinity(
 ){
   if( affinity>=SQLITE_AFF_NUMERIC ){
     assert( affinity==SQLITE_AFF_INTEGER || affinity==SQLITE_AFF_REAL
-             || affinity==SQLITE_AFF_NUMERIC );
+             || affinity==SQLITE_AFF_NUMERIC || affinity==SQLITE_AFF_FLEXNUM );
     if( (pRec->flags & MEM_Int)==0 ){ /*OPTIMIZATION-IF-FALSE*/
       if( (pRec->flags & MEM_Real)==0 ){
         if( pRec->flags & MEM_Str ) applyNumericAffinity(pRec,1);
-      }else{
+      }else if( affinity<=SQLITE_AFF_REAL ){
         sqlite3VdbeIntegerAffinity(pRec);
       }
     }
@@ -2115,7 +2119,6 @@ case OP_Ge: {             /* same as TK_GE, jump, in1, in3 */
   flags1 = pIn1->flags;
   flags3 = pIn3->flags;
   if( (flags1 & flags3 & MEM_Int)!=0 ){
-    assert( (pOp->p5 & SQLITE_AFF_MASK)!=SQLITE_AFF_TEXT || CORRUPT_DB );
     /* Common case of comparison of two integers */
     if( pIn3->u.i > pIn1->u.i ){
       if( sqlite3aGTb[pOp->opcode] ){
@@ -2183,7 +2186,7 @@ case OP_Ge: {             /* same as TK_GE, jump, in1, in3 */
           applyNumericAffinity(pIn3,0);
         }
       }
-    }else if( affinity==SQLITE_AFF_TEXT ){
+    }else if( affinity==SQLITE_AFF_TEXT && ((flags1 | flags3) & MEM_Str)!=0 ){
       if( (flags1 & MEM_Str)==0 && (flags1&(MEM_Int|MEM_Real|MEM_IntReal))!=0 ){
         testcase( pIn1->flags & MEM_Int );
         testcase( pIn1->flags & MEM_Real );
