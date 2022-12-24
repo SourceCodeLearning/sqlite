@@ -539,7 +539,7 @@ self.sqlite3InitModule = sqlite3InitModule;
         }
         w.dealloc(m);
       }
-      
+
       // isPtr32()
       {
         const ip = w.isPtr32;
@@ -743,6 +743,65 @@ self.sqlite3InitModule = sqlite3InitModule;
             .assert('HI' === cj(new Uint8Array([72, 73])));
         });
 
+        // jsFuncToWasm()
+        {
+          const fsum3 = (x,y,z)=>x+y+z;
+          fw = w.jsFuncToWasm('i(iii)', fsum3);
+          T.assert(fw instanceof Function)
+            .assert( fsum3 !== fw )
+            .assert( 3 === fw.length )
+            .assert( 6 === fw(1,2,3) );
+          T.mustThrowMatching( ()=>w.jsFuncToWasm('x()', function(){}),
+                               'Invalid signature letter: x');
+        }
+
+        // xWrap(Function,...)
+        {
+          let fp;
+          try {
+            const fmy = function fmy(i,s,d){
+              if(fmy.debug) log("fmy(",...arguments,")");
+              T.assert( 3 === i )
+                .assert( w.isPtr(s) )
+                .assert( w.cstrToJs(s) === 'a string' )
+                .assert( T.eqApprox(1.2, d) );
+              return w.allocCString("hi");
+            };
+            fmy.debug = false;
+            const xwArgs = ['string:dealloc', ['i32', 'string', 'f64']];
+            fw = w.xWrap(fmy, ...xwArgs);
+            const fmyArgs = [3, 'a string', 1.2];
+            let rc = fw(...fmyArgs);
+            T.assert( 'hi' === rc );
+            if(0){
+              /* Retain this as a "reminder to self"...
+
+                 This extra level of indirection does not work: the
+                 string argument is ending up as a null in fmy() but
+                 the numeric arguments are making their ways through
+
+                 What's happening is: installFunction() is creating a
+                 WASM-compatible function instance. When we pass a JS string
+                 into there it's getting coerced into `null` before being passed
+                 on to the lower-level wrapper.
+              */
+              fmy.debug = true;
+              fp = wasm.installFunction('i(isd)', fw);
+              fw = w.functionEntry(fp);
+              rc = fw(...fmyArgs);
+              log("rc =",rc);
+              T.assert( 'hi' === rc );
+              // Similarly, this does not work:
+              //let fpw = w.xWrap(fp, null, [null,null,null]);
+              //rc = fpw(...fmyArgs);
+              //log("rc =",rc);
+              //T.assert( 'hi' === rc );
+            }
+          }finally{
+            wasm.uninstallFunction(fp);
+          }
+        }
+
         if(haveWasmCTests()){
           if(!sqlite3.config.useStdAlloc){
             fw = w.xWrap('sqlite3_wasm_test_str_hello', 'utf8:dealloc',['i32']);
@@ -768,7 +827,7 @@ self.sqlite3InitModule = sqlite3InitModule;
             });
           }
         }
-      }
+      }/*xWrap()*/
     }/*WhWasmUtil*/)
 
   ////////////////////////////////////////////////////////////////////
@@ -997,7 +1056,6 @@ self.sqlite3InitModule = sqlite3InitModule;
         P.restore(stack);
       }
     }/*pstack tests*/)
-
   ////////////////////////////////////////////////////////////////////
   ;/*end of C/WASM utils checks*/
 
@@ -1592,6 +1650,19 @@ self.sqlite3InitModule = sqlite3InitModule;
           assert(2 === blobRc.length);
         //debug("blobRc=",blobRc);
         T.assert(0x68==blobRc[0] && 0x69==blobRc[1]);
+
+        let rc = sqlite3.capi.sqlite3_create_function_v2(
+          this.db, "foo", 0, -1, 0, 0, 0, 0, 0
+        );
+        T.assert(
+          sqlite3.capi.SQLITE_FORMAT === rc,
+          "For invalid eTextRep argument."
+        );
+        rc = sqlite3.capi.sqlite3_create_function_v2(this.db, "foo", 0);
+        T.assert(
+          sqlite3.capi.SQLITE_MISUSE === rc,
+          "For invalid arg count."
+        );
       }
     })
 
@@ -2275,7 +2346,7 @@ self.sqlite3InitModule = sqlite3InitModule;
       T.assert(0===rc).assert(3===collationCounter);
       rc = capi.sqlite3_create_collation(this.db,"hi",capi.SQLITE_UTF8/*not enough args*/);
       T.assert(capi.SQLITE_MISUSE === rc);
-      rc = capi.sqlite3_create_collation_v2(this.db,"hi",0/*wrong encoding*/,0,0,0);
+      rc = capi.sqlite3_create_collation_v2(this.db,"hi",capi.SQLITE_UTF8+1/*invalid encoding*/,0,0,0);
       T.assert(capi.SQLITE_FORMAT === rc)
         .mustThrowMatching(()=>this.db.checkRc(rc),
                            /SQLITE_UTF8 is the only supported encoding./);
@@ -2486,7 +2557,7 @@ self.sqlite3InitModule = sqlite3InitModule;
             capi.sqlite3_js_vfs_create_file(
               "no-such-vfs", filename, ba
             );
-          }, "Unknown sqlite3_vfs name: no-such-vfs");
+          }, "SQLITE_NOTFOUND: Unknown sqlite3_vfs name: no-such-vfs");
         }finally{
           if(sh) await sh.close();
           unlink();

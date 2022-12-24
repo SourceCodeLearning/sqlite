@@ -79,13 +79,9 @@
      the `realloc(3)`-compatible routine for the WASM
      environment. Defaults to `"sqlite3_realloc"`.
 
-   - `wasmfsOpfsDir`[^1]: if the environment supports persistent
-     storage using OPFS-over-WASMFS , this directory names the "mount
-     point" for that directory. It must be prefixed by `/` and may
-     contain only a single directory-name part. Using the root
-     directory name is not supported by any current persistent
-     backend.  This setting is only used in WASMFS-enabled builds.
-
+   - `wasmfsOpfsDir`[^1]: As of 2022-12-17, this feature does not
+     currently work due to incompatible Emscripten-side changes made
+     in the WASMFS+OPFS combination. This option is currently ignored.
 
    [^1] = This property may optionally be a function, in which case this
           function re-assigns it to the value returned from that function,
@@ -138,6 +134,10 @@ self.sqlite3ApiBootstrap = function sqlite3ApiBootstrap(
       config[k] = config[k]();
     }
   });
+  config.wasmOpfsDir =
+    /* 2022-12-17: WASMFS+OPFS can no longer be activated from the
+       main thread (aborts via a failed assert() if it's attempted),
+       which eliminates any(?) benefit to supporting it. */  false;
 
   /** 
       The main sqlite3 binding API gets installed into this object,
@@ -418,6 +418,92 @@ self.sqlite3ApiBootstrap = function sqlite3ApiBootstrap(
 
   Object.assign(capi, {
     /**
+       sqlite3_bind_blob() works exactly like its C counterpart unless
+       its 3rd argument is one of:
+
+       - JS string: the 3rd argument is converted to a C string, the
+         4th argument is ignored, and the C-string's length is used
+         in its place.
+
+       - Array: converted to a string as defined for "flexible
+         strings" and then it's treated as a JS string.
+
+       - Int8Array or Uint8Array: wasm.allocFromTypedArray() is used to
+         conver the memory to the WASM heap. If the 4th argument is
+         0 or greater, it is used as-is, otherwise the array's byteLength
+         value is used. This is an exception to the C API's undefined
+         behavior for a negative 4th argument, but results are undefined
+         if the given 4th argument value is greater than the byteLength
+         of the input array.
+
+       - If it's an ArrayBuffer, it gets wrapped in a Uint8Array and
+         treated as that type.
+
+       In all of those cases, the final argument (text destructor) is
+       ignored and capi.SQLITE_TRANSIENT is assumed.
+
+       A 3rd argument of `null` is treated as if it were a WASM pointer
+       of 0.
+
+       If the 3rd argument is neither a WASM pointer nor one of the
+       above-described types, capi.SQLITE_MISUSE is returned.
+
+       The first argument may be either an `sqlite3_stmt*` WASM
+       pointer or an sqlite3.oo1.Stmt instance.
+
+       For consistency with the C API, it requires the same number of
+       arguments. It returns capi.SQLITE_MISUSE if passed any other
+       argument count.
+    */
+    sqlite3_bind_blob: undefined/*installed later*/,
+
+    /**
+       sqlite3_bind_text() works exactly like its C counterpart unless
+       its 3rd argument is one of:
+
+       - JS string: the 3rd argument is converted to a C string, the
+         4th argument is ignored, and the C-string's length is used
+         in its place.
+
+       - Array: converted to a string as defined for "flexible
+         strings". The 4th argument is ignored and a value of -1
+         is assumed.
+
+       - Int8Array or Uint8Array: is assumed to contain UTF-8 text, is
+         converted to a string. The 4th argument is ignored, replaced
+         by the array's byteLength value.
+
+       - If it's an ArrayBuffer, it gets wrapped in a Uint8Array and
+         treated as that type.
+
+       In each of those cases, the final argument (text destructor) is
+       ignored and capi.SQLITE_TRANSIENT is assumed.
+
+       A 3rd argument of `null` is treated as if it were a WASM pointer
+       of 0.
+
+       If the 3rd argument is neither a WASM pointer nor one of the
+       above-described types, capi.SQLITE_MISUSE is returned.
+
+       The first argument may be either an `sqlite3_stmt*` WASM
+       pointer or an sqlite3.oo1.Stmt instance.
+
+       For consistency with the C API, it requires the same number of
+       arguments. It returns capi.SQLITE_MISUSE if passed any other
+       argument count.
+
+       If client code needs to bind partial strings, it needs to
+       either parcel the string up before passing it in here or it
+       must pass in a WASM pointer for the 3rd argument and a valid
+       4th-argument value, taking care not to pass a value which
+       truncates a multi-byte UTF-8 character. When passing
+       WASM-format strings, it is important that the final argument be
+       valid or unexpected content can result can result, or even a
+       crash if the application reads past the WASM heap bounds.
+    */
+    sqlite3_bind_text: undefined/*installed later*/,
+
+    /**
        sqlite3_create_function_v2() differs from its native
        counterpart only in the following ways:
 
@@ -425,13 +511,19 @@ self.sqlite3ApiBootstrap = function sqlite3ApiBootstrap(
        any encoding other than sqlite3.SQLITE_UTF8. The JS API does not
        currently support any other encoding and likely never
        will. This function does not replace that argument on its own
-       because it may contain other flags.
+       because it may contain other flags. As a special case, if
+       the bottom 4 bits of that argument are 0, SQLITE_UTF8 is
+       assumed.
 
        2) Any of the four final arguments may be either WASM pointers
        (assumed to be function pointers) or JS Functions. In the
        latter case, each gets bound to WASM using
        sqlite3.capi.wasm.installFunction() and that wrapper is passed
        on to the native implementation.
+
+       For consistency with the C API, it requires the same number of
+       arguments. It returns capi.SQLITE_MISUSE if passed any other
+       argument count.
 
        The semantics of JS functions are:
 
@@ -519,18 +611,18 @@ self.sqlite3ApiBootstrap = function sqlite3ApiBootstrap(
        WASM build is compiled with emcc's `-sALLOW_TABLE_GROWTH`
        flag.
     */
-    sqlite3_create_function_v2: function(
+    sqlite3_create_function_v2: (
       pDb, funcName, nArg, eTextRep, pApp,
       xFunc, xStep, xFinal, xDestroy
-    ){/*installed later*/},
+    )=>{/*installed later*/},
     /**
        Equivalent to passing the same arguments to
        sqlite3_create_function_v2(), with 0 as the final argument.
     */
-    sqlite3_create_function:function(
+    sqlite3_create_function: (
       pDb, funcName, nArg, eTextRep, pApp,
       xFunc, xStep, xFinal
-    ){/*installed later*/},
+    )=>{/*installed later*/},
     /**
        The sqlite3_create_window_function() JS wrapper differs from
        its native implementation in the exact same way that
@@ -538,10 +630,10 @@ self.sqlite3ApiBootstrap = function sqlite3ApiBootstrap(
        xInverse(), is treated identically to xStep() by the wrapping
        layer.
     */
-    sqlite3_create_window_function: function(
+    sqlite3_create_window_function: (
       pDb, funcName, nArg, eTextRep, pApp,
       xStep, xFinal, xValue, xInverse, xDestroy
-    ){/*installed later*/},
+    )=>{/*installed later*/},
     /**
        The sqlite3_prepare_v3() binding handles two different uses
        with differing JS/WASM semantics:
@@ -663,7 +755,7 @@ self.sqlite3ApiBootstrap = function sqlite3ApiBootstrap(
     toss3,
     typedArrayPart
   };
-    
+
   Object.assign(wasm, {
     /**
        Emscripten APIs have a deep-seated assumption that all pointers
@@ -1050,6 +1142,13 @@ self.sqlite3ApiBootstrap = function sqlite3ApiBootstrap(
   /** State for sqlite3_wasmfs_opfs_dir(). */
   let __wasmfsOpfsDir = undefined;
   /**
+     2022-12-17: incompatible WASMFS changes have made WASMFS+OPFS
+     unavailable from the main thread, which eliminates the most
+     significant benefit of supporting WASMFS. This function is now a
+     no-op which always returns a falsy value. Before that change,
+     this function behaved as documented below (and how it will again
+     if we can find a compelling reason to support it).
+
      If the wasm environment has a WASMFS/OPFS-backed persistent
      storage directory, its path is returned by this function. If it
      does not then it returns "" (noting that "" is a falsy value).
@@ -1066,6 +1165,8 @@ self.sqlite3ApiBootstrap = function sqlite3ApiBootstrap(
     if(undefined !== __wasmfsOpfsDir) return __wasmfsOpfsDir;
     // If we have no OPFS, there is no persistent dir
     const pdir = config.wasmfsOpfsDir;
+    console.error("sqlite3_wasmfs_opfs_dir() can no longer work due "+
+                  "to incompatible WASMFS changes. It will be removed.");
     if(!pdir
        || !self.FileSystemHandle
        || !self.FileSystemDirectoryHandle
