@@ -24,7 +24,24 @@ self.sqlite3ApiBootstrap.initializers.push(function(sqlite3){
   self.WhWasmUtilInstaller(wasm);
   delete self.WhWasmUtilInstaller;
 
-  {
+  if(0){
+    /**
+       Please keep this block around as a maintenance reminder
+       that we cannot rely on this type of check.
+
+       This block fails on Safari, per a report at
+       https://sqlite.org/forum/forumpost/e5b20e1feb.
+
+       It turns out that what Safari serves from the indirect function
+       table (e.g. wasm.functionEntry(X)) is anonymous functions which
+       wrap the WASM functions, rather than returning the WASM
+       functions themselves. That means comparison of such functions
+       is useless for determining whether or not we have a specific
+       function from wasm.exports. i.e. if function X is indirection
+       function table entry N then wasm.exports.X is not equal to
+       wasm.functionEntry(N) in Safari, despite being so in the other
+       browsers.
+    */
     /**
        Find a mapping for SQLITE_WASM_DEALLOC, which the API
        guarantees is a WASM pointer to the same underlying function as
@@ -795,6 +812,10 @@ self.sqlite3ApiBootstrap.initializers.push(function(sqlite3){
         // one of the Emscripten-driven optimizers.
         capi[e[0]] = e[1];
       }
+    }
+    if(!wasm.functionEntry(capi.SQLITE_WASM_DEALLOC)){
+      toss("Internal error: cannot resolve exported function",
+           "entry SQLITE_WASM_DEALLOC (=="+capi.SQLITE_WASM_DEALLOC+").");
     }
     const __rcMap = Object.create(null);
     for(const t of ['resultCodes']){
