@@ -1526,6 +1526,7 @@ static int whereKeyStats(
   assert( pRec!=0 );
   assert( pIdx->nSample>0 );
   assert( pRec->nField>0 );
+ 
 
   /* Do a binary search to find the first sample greater than or equal
   ** to pRec. If pRec contains a single field, the set of samples to search
@@ -1571,7 +1572,12 @@ static int whereKeyStats(
   ** it is extended to two fields. The duplicates that this creates do not 
   ** cause any problems.
   */
-  nField = MIN(pRec->nField, pIdx->nSample);
+  if( !HasRowid(pIdx->pTable) && IsPrimaryKeyIndex(pIdx) ){
+    nField = pIdx->nKeyCol;
+  }else{
+    nField = pIdx->nColumn;
+  }
+  nField = MIN(pRec->nField, nField);
   iCol = 0;
   iSample = pIdx->nSample * nField;
   do{
@@ -6232,7 +6238,7 @@ WhereInfo *sqlite3WhereBegin(
         assert( n<=pTab->nCol );
       }
 #ifdef SQLITE_ENABLE_CURSOR_HINTS
-      if( pLoop->u.btree.pIndex!=0 ){
+      if( pLoop->u.btree.pIndex!=0 && (pTab->tabFlags & TF_WithoutRowid)==0 ){
         sqlite3VdbeChangeP5(v, OPFLAG_SEEKEQ|bFordelete);
       }else
 #endif
