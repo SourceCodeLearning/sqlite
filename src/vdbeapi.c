@@ -271,7 +271,7 @@ int sqlite3_value_type(sqlite3_value* pVal){
      SQLITE_NULL,     /* 0x1f (not possible) */
      SQLITE_FLOAT,    /* 0x20 INTREAL */
      SQLITE_NULL,     /* 0x21 (not possible) */
-     SQLITE_TEXT,     /* 0x22 INTREAL + TEXT */
+     SQLITE_FLOAT,    /* 0x22 INTREAL + TEXT */
      SQLITE_NULL,     /* 0x23 (not possible) */
      SQLITE_FLOAT,    /* 0x24 (not possible) */
      SQLITE_NULL,     /* 0x25 (not possible) */
@@ -2140,7 +2140,7 @@ int sqlite3_stmt_scanstatus_v2(
   Vdbe *p = (Vdbe*)pStmt;
   VdbeOp *aOp = p->aOp;
   int nOp = p->nOp;
-  ScanStatus *pScan;
+  ScanStatus *pScan = 0;
   int idx;
 
   if( p->pFrame ){

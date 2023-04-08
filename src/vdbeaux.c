@@ -3326,6 +3326,8 @@ int sqlite3VdbeHalt(Vdbe *p){
           db->flags &= ~(u64)SQLITE_DeferFKs;
           sqlite3CommitInternalChanges(db);
         }
+      }else if( p->rc==SQLITE_SCHEMA && db->nVdbeActive>1 ){
+        p->nChange = 0;
       }else{
         sqlite3RollbackAll(db, SQLITE_OK);
         p->nChange = 0;
@@ -3644,9 +3646,9 @@ static void sqlite3VdbeClearObject(sqlite3 *db, Vdbe *p){
 #ifdef SQLITE_ENABLE_NORMALIZE
   sqlite3DbFree(db, p->zNormSql);
   {
-    DblquoteStr *pThis, *pNext;
-    for(pThis=p->pDblStr; pThis; pThis=pNext){
-      pNext = pThis->pNextStr;
+    DblquoteStr *pThis, *pNxt;
+    for(pThis=p->pDblStr; pThis; pThis=pNxt){
+      pNxt = pThis->pNextStr;
       sqlite3DbFree(db, pThis);
     }
   }
