@@ -1,5 +1,5 @@
 /*
-** 2023-07-22
+** 2023-08-25
 **
 ** The author disclaims copyright to this source code.  In place of
 ** a legal notice, here is a blessing:
@@ -14,12 +14,18 @@
 package org.sqlite.jni;
 
 /**
-   Callback proxy for use with sqlite3_rollback_hook().
+   Callback for use with sqlite3_create_collation()
 */
-public interface RollbackHook {
+public abstract class CollationCallback
+  implements SQLite3CallbackProxy, XDestroyCallback {
   /**
-     Works as documented for the sqlite3_rollback_hook() callback.
-     Must not throw.
+     Must compare the given byte arrays using memcmp() semantics.
   */
-  void xRollbackHook();
+  public abstract int call(byte[] lhs, byte[] rhs);
+
+  /**
+     Called by SQLite when the collation is destroyed. If a collation
+     requires custom cleanup, override this method.
+  */
+  public void xDestroy(){}
 }

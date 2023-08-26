@@ -250,14 +250,14 @@ public class SQLTester {
   }
 
   public void runTests() throws Exception {
-    final long tStart = System.nanoTime();
+    final long tStart = System.currentTimeMillis();
     for(String f : listInFiles){
       reset();
       ++nTestFile;
       final TestScript ts = new TestScript(f);
       outln(nextStartEmoji(), " starting [",f,"]");
       boolean threw = false;
-      final long timeStart = System.nanoTime();
+      final long timeStart = System.currentTimeMillis();
       try{
         ts.run(this);
       }catch(SQLTesterException e){
@@ -267,14 +267,14 @@ public class SQLTester {
         if( keepGoing ) outln("Continuing anyway becaure of the keep-going option.");
         else if( e.isFatal() ) throw e;
       }finally{
-        final long timeEnd = System.nanoTime();
+        final long timeEnd = System.currentTimeMillis();
         outln("🏁",(threw ? "❌" : "✅")," ",nTest," test(s) in ",
-              ((timeEnd-timeStart)/1000000.0),"ms.");
+              (timeEnd-timeStart),"ms.");
         //ts.getFilename());
       }
     }
-    final long tEnd = System.nanoTime();
-    outln("Total run-time: ",((tEnd-tStart)/1000000.0),"ms");
+    final long tEnd = System.currentTimeMillis();
+    outln("Total run-time: ",(tEnd-tStart),"ms");
     Util.unlink(initialDbName);
   }
 
@@ -609,9 +609,9 @@ public class SQLTester {
       }
       t.addTestScript(a);
     }
-    final AutoExtension ax = new AutoExtension() {
+    final AutoExtensionCallback ax = new AutoExtensionCallback() {
         private final SQLTester tester = t;
-        public int xEntryPoint(sqlite3 db){
+        @Override public int call(sqlite3 db){
           final String init = tester.getDbInitSql();
           if( !init.isEmpty() ){
             tester.execSql(db, true, ResultBufferMode.NONE, null, init);
@@ -629,7 +629,7 @@ public class SQLTester {
         t.outln("Aborted ",t.nAbortedScript," script(s).");
       }
       if( dumpInternals ){
-        sqlite3_do_something_for_developer();
+        sqlite3_jni_internal_details();
       }
     }
   }
