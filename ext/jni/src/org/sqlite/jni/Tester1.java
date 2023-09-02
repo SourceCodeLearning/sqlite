@@ -30,6 +30,13 @@ import java.util.concurrent.Future;
 @java.lang.annotation.Retention(java.lang.annotation.RetentionPolicy.RUNTIME)
 @java.lang.annotation.Target({java.lang.annotation.ElementType.METHOD})
 @interface ManualTest{}
+/**
+   Annotation for Tester1 tests which mark those which must be skipped
+   in multi-threaded mode.
+*/
+@java.lang.annotation.Retention(java.lang.annotation.RetentionPolicy.RUNTIME)
+@java.lang.annotation.Target({java.lang.annotation.ElementType.METHOD})
+@interface SingleThreadOnly{}
 
 public class Tester1 implements Runnable {
   //! True when running in multi-threaded mode.
@@ -253,12 +260,14 @@ public class Tester1 implements Runnable {
     affirm(0 == rc);
     sqlite3_stmt stmt = outStmt.take();
     affirm(0 != stmt.getNativePointer());
+    affirm( db == sqlite3_db_handle(stmt) );
     rc = sqlite3_step(stmt);
     if( SQLITE_DONE != rc ){
       outln("step failed ??? ",rc, " ",sqlite3_errmsg(db));
     }
     affirm(SQLITE_DONE == rc);
     sqlite3_finalize(stmt);
+    affirm( null == sqlite3_db_handle(stmt) );
     affirm(0 == stmt.getNativePointer());
 
     { /* Demonstrate how to use the "zTail" option of
@@ -433,9 +442,13 @@ public class Tester1 implements Runnable {
     StringBuilder sbuf = new StringBuilder();
     n = 0;
     while( SQLITE_ROW == sqlite3_step(stmt) ){
-      String txt = sqlite3_column_text16(stmt, 0);
-      //outln("txt = "+txt);
+      final sqlite3_value sv = sqlite3_value_dup(sqlite3_column_value(stmt,0));
+      final String txt = sqlite3_column_text16(stmt, 0);
       sbuf.append( txt );
+      affirm( txt.equals(sqlite3_column_text(stmt, 0)) );
+      affirm( txt.equals(sqlite3_value_text(sv)) );
+      affirm( txt.equals(sqlite3_value_text16(sv)) );
+      sqlite3_value_free(sv);
       ++n;
     }
     sqlite3_finalize(stmt);
@@ -488,7 +501,7 @@ public class Tester1 implements Runnable {
   private void testCollation(){
     final sqlite3 db = createNewDb();
     execSql(db, "CREATE TABLE t(a); INSERT INTO t(a) VALUES('a'),('b'),('c')");
-    final ValueHolder<Boolean> xDestroyCalled = new ValueHolder<>(false);
+    final ValueHolder<Integer> xDestroyCalled = new ValueHolder<>(0);
     final CollationCallback myCollation = new CollationCallback() {
         private String myState =
           "this is local state. There is much like it, but this is mine.";
@@ -510,7 +523,7 @@ public class Tester1 implements Runnable {
         @Override
         public void xDestroy() {
           // Just demonstrates that xDestroy is called.
-          xDestroyCalled.value = true;
+          ++xDestroyCalled.value;
         }
       };
     final CollationNeededCallback collLoader = new CollationNeededCallback(){
@@ -552,12 +565,12 @@ public class Tester1 implements Runnable {
     }
     affirm(3 == counter);
     sqlite3_finalize(stmt);
-    affirm(!xDestroyCalled.value);
+    affirm( 0 == xDestroyCalled.value );
     rc = sqlite3_collation_needed(db, null);
     affirm( 0 == rc );
     sqlite3_close_v2(db);
     affirm( 0 == db.getNativePointer() );
-    affirm(xDestroyCalled.value);
+    affirm( 1 == xDestroyCalled.value );
   }
 
   @ManualTest /* because threading is meaningless here */
@@ -686,19 +699,25 @@ public class Tester1 implements Runnable {
     sqlite3_close_v2(db);
   }
 
+  @SingleThreadOnly
   private void testUdfJavaObject(){
+    affirm( !mtMode );
     final sqlite3 db = createNewDb();
     final ValueHolder<sqlite3> testResult = new ValueHolder<>(db);
+    final ValueHolder<Integer> boundObj = new ValueHolder<>(42);
     final SQLFunction func = new ScalarFunction(){
         public void xFunc(sqlite3_context cx, sqlite3_value args[]){
           sqlite3_result_java_object(cx, testResult.value);
+          affirm( sqlite3_value_java_object(args[0]) == boundObj );
         }
       };
     int rc = sqlite3_create_function(db, "myfunc", -1, SQLITE_UTF8, func);
     affirm(0 == rc);
-    final sqlite3_stmt stmt = prepare(db, "select myfunc()");
+    sqlite3_stmt stmt = prepare(db, "select myfunc(?)");
     affirm( 0 != stmt.getNativePointer() );
     affirm( testResult.value == db );
+    rc = sqlite3_bind_java_object(stmt, 1, boundObj);
+    affirm( 0==rc );
     int n = 0;
     if( SQLITE_ROW == sqlite3_step(stmt) ){
       final sqlite3_value v = sqlite3_column_value(stmt, 0);
@@ -940,15 +959,11 @@ public class Tester1 implements Runnable {
     rc = sqlite3_db_config(db1, SQLITE_DBCONFIG_MAINDBNAME, "foo");
     affirm( sqlite3_db_filename(db1, "foo").endsWith(dbName) );
 
-    final ValueHolder<Boolean> xDestroyed = new ValueHolder<>(false);
     final ValueHolder<Integer> xBusyCalled = new ValueHolder<>(0);
     BusyHandlerCallback handler = new BusyHandlerCallback(){
         @Override public int call(int n){
           //outln("busy handler #"+n);
           return n > 2 ? 0 : ++xBusyCalled.value;
-        }
-        @Override public void xDestroy(){
-          xDestroyed.value = true;
         }
       };
     rc = sqlite3_busy_handler(db2, handler);
@@ -956,15 +971,12 @@ public class Tester1 implements Runnable {
 
     // Force a locked condition...
     execSql(db1, "BEGIN EXCLUSIVE");
-    affirm(!xDestroyed.value);
     rc = sqlite3_prepare_v2(db2, "SELECT * from t", outStmt);
     affirm( SQLITE_BUSY == rc);
     assert( null == outStmt.get() );
     affirm( 3 == xBusyCalled.value );
     sqlite3_close_v2(db1);
-    affirm(!xDestroyed.value);
     sqlite3_close_v2(db2);
-    affirm(xDestroyed.value);
     try{
       final java.io.File f = new java.io.File(dbName);
       f.delete();
@@ -1093,7 +1105,7 @@ public class Tester1 implements Runnable {
      This test is functionally identical to testUpdateHook(), only with a
      different callback type.
   */
-  private synchronized void testPreUpdateHook(){
+  private void testPreUpdateHook(){
     if( !sqlite3_compileoption_used("ENABLE_PREUPDATE_HOOK") ){
       //outln("Skipping testPreUpdateHook(): no pre-update hook support.");
       return;
@@ -1203,8 +1215,8 @@ public class Tester1 implements Runnable {
      it throws.
   */
   @SuppressWarnings("unchecked")
-  @ManualTest /* because the Fts5 parts are not yet known to be
-                 thread-safe */
+  @SingleThreadOnly /* because the Fts5 parts are not yet known to be
+                       thread-safe */
   private void testFts5() throws Exception {
     if( !sqlite3_compileoption_used("ENABLE_FTS5") ){
       //outln("SQLITE_ENABLE_FTS5 is not set. Skipping FTS5 tests.");
@@ -1255,8 +1267,8 @@ public class Tester1 implements Runnable {
     sqlite3_close(db);
   }
 
-  @ManualTest/* because multiple threads legitimately make these
-                results unpredictable */
+  @SingleThreadOnly /* because multiple threads legitimately make these
+                       results unpredictable */
   private synchronized void testAutoExtension(){
     final ValueHolder<Integer> val = new ValueHolder<>(0);
     final ValueHolder<String> toss = new ValueHolder<>(null);
@@ -1347,7 +1359,7 @@ public class Tester1 implements Runnable {
     affirm( 8 == val.value );
   }
 
-  @ManualTest /* because we only want to run this test manually */
+  @ManualTest /* we really only want to run this test manually. */
   private void testSleep(){
     out("Sleeping briefly... ");
     sqlite3_sleep(600);
@@ -1403,10 +1415,6 @@ public class Tester1 implements Runnable {
     }
     if( !fromThread ){
       testBusy();
-      if( !mtMode ){
-        testAutoExtension() /* threads rightfully muck up these results */;
-        testFts5();
-      }
     }
     synchronized( this.getClass() ){
       ++nTestRuns;
@@ -1488,34 +1496,22 @@ public class Tester1 implements Runnable {
       }
     }
 
-    {
-      // Build list of tests to run from the methods named test*().
-      testMethods = new ArrayList<>();
-      for(final java.lang.reflect.Method m : Tester1.class.getDeclaredMethods()){
-        final String name = m.getName();
-        if( name.equals("testFail") ){
-          if( forceFail ){
-            testMethods.add(m);
-          }
-        }else if( !m.isAnnotationPresent( ManualTest.class ) ){
-          if( name.startsWith("test") ){
-            testMethods.add(m);
-          }
-        }
-      }
-    }
-
     if( sqlLog ){
       if( sqlite3_compileoption_used("ENABLE_SQLLOG") ){
-        int rc = sqlite3_config( new ConfigSqllogCallback() {
+        final ConfigSqllogCallback log = new ConfigSqllogCallback() {
             @Override public void call(sqlite3 db, String msg, int op){
               switch(op){
                 case 0: outln("Opening db: ",db); break;
-                case 1: outln(db,": ",msg); break;
+                case 1: outln("SQL ",db,": ",msg); break;
                 case 2: outln("Closing db: ",db); break;
               }
             }
-          });
+          };
+        int rc = sqlite3_config( log );
+        affirm( 0==rc );
+        rc = sqlite3_config( null );
+        affirm( 0==rc );
+        rc = sqlite3_config( log );
         affirm( 0==rc );
       }else{
         outln("WARNING: -sqllog is not active because library was built ",
@@ -1527,6 +1523,27 @@ public class Tester1 implements Runnable {
     outln("If you just saw warning messages regarding CallStaticObjectMethod, ",
           "you are very likely seeing the side effects of a known openjdk8 ",
           "bug. It is unsightly but does not affect the library.");
+
+    {
+      // Build list of tests to run from the methods named test*().
+      testMethods = new ArrayList<>();
+      out("Skipping tests in multi-thread mode:");
+      for(final java.lang.reflect.Method m : Tester1.class.getDeclaredMethods()){
+        final String name = m.getName();
+        if( name.equals("testFail") ){
+          if( forceFail ){
+            testMethods.add(m);
+          }
+        }else if( !m.isAnnotationPresent( ManualTest.class ) ){
+          if( nThread>1 && m.isAnnotationPresent( SingleThreadOnly.class ) ){
+            out(" "+name+"()");
+          }else if( name.startsWith("test") ){
+            testMethods.add(m);
+          }
+        }
+      }
+      out("\n");
+    }
 
     final long timeStart = System.currentTimeMillis();
     int nLoop = 0;
@@ -1560,6 +1577,8 @@ public class Tester1 implements Runnable {
     outln("Running ",nRepeat," loop(s) with ",nThread," thread(s) each.");
     if( takeNaps ) outln("Napping between tests is enabled.");
     for( int n = 0; n < nRepeat; ++n ){
+      ++nLoop;
+      out((1==nLoop ? "" : " ")+nLoop);
       if( nThread<=1 ){
         new Tester1(0).runTests(false);
         continue;
@@ -1567,8 +1586,6 @@ public class Tester1 implements Runnable {
       Tester1.mtMode = true;
       final ExecutorService ex = Executors.newFixedThreadPool( nThread );
       //final List<Future<?>> futures = new ArrayList<>();
-      ++nLoop;
-      out((1==nLoop ? "" : " ")+nLoop);
       for( int i = 0; i < nThread; ++i ){
         ex.submit( new Tester1(i), i );
       }

@@ -59,6 +59,11 @@ $(bin.version-info): $(dir.tool)/version-info.c $(sqlite3.h) $(dir.top)/Makefile
 # Be explicit about which Java files to compile so that we can work on
 # in-progress files without requiring them to be in a compilable statae.
 JAVA_FILES.main := $(patsubst %,$(dir.src.jni)/%,\
+  annotation/Canonical.java \
+  annotation/NotNull.java \
+  annotation/Nullable.java \
+  annotation/package-info.java \
+  AbstractCollationCallback.java \
   AggregateFunction.java \
   AuthorizerCallback.java \
   AutoExtensionCallback.java \
@@ -68,8 +73,6 @@ JAVA_FILES.main := $(patsubst %,$(dir.src.jni)/%,\
   CommitHookCallback.java \
   ConfigSqllogCallback.java \
   NativePointerHolder.java \
-  NotNull.java \
-  Nullable.java \
   OutputPointer.java \
   PreupdateHookCallback.java \
   ProgressHandlerCallback.java \
@@ -165,6 +168,7 @@ $(sqlite3.h):
 $(sqlite3.c): $(sqlite3.h)
 
 opt.threadsafe ?= 1
+opt.oom ?= 0
 SQLITE_OPT = \
   -DSQLITE_ENABLE_RTREE \
   -DSQLITE_ENABLE_EXPLAIN_COMMENTS \
@@ -182,6 +186,7 @@ SQLITE_OPT = \
   -DSQLITE_TEMP_STORE=2 \
   -DSQLITE_USE_URI=1 \
   -DSQLITE_C=$(sqlite3.c) \
+  -DSQLITE_JNI_FATAL_OOM=$(opt.oom) \
   -DSQLITE_DEBUG
 
 SQLITE_OPT += -g -DDEBUG -UNDEBUG
@@ -243,11 +248,18 @@ test.flags ?=
 test.main.flags = -ea -Djava.library.path=$(dir.bld.c) \
                   $(java.flags) -cp $(classpath) \
                   org.sqlite.jni.Tester1
-test-one: $(SQLite3Jni.class) $(sqlite3-jni.dll)
+test.deps := $(SQLite3Jni.class) $(sqlite3-jni.dll)
+test-one: $(test.deps)
 	$(bin.java) $(test.main.flags) $(test.flags)
-test: test-one
-	@echo "Again in multi-threaded mode:";
-	$(bin.java) $(test.main.flags) -t 5 -r 20 -shuffle $(test.flags)
+test-sqllog: $(test.deps)
+	@echo "Testing with -sqllog..."
+	$(bin.java) $(test.main.flags) -sqllog
+test-mt: $(test.deps)
+	@echo "Testing in multi-threaded mode:";
+	$(bin.java) $(test.main.flags) -t 11 -r 50 -shuffle $(test.flags)
+
+test: test-one test-mt
+tests: test test-sqllog
 
 tester.scripts := $(sort $(wildcard $(dir.src)/tests/*.test))
 tester.flags ?= # --verbose
@@ -283,14 +295,17 @@ endif
 
 tester-ext: tester-local
 tester: tester-ext
-tests: test tester
+tests: tester
 
 ########################################################################
 # Build each SQLITE_THREADMODE variant and run all tests against them.
 multitest: clean
-	$(MAKE) opt.threadsafe=0 tests clean
-	$(MAKE) opt.threadsafe=1 tests clean
-	$(MAKE) opt.threadsafe=2 tests clean
+	$(MAKE) opt.threadsafe=0 opt.oom=1 tests clean
+	$(MAKE) opt.threadsafe=0 opt.oom=0 tests clean
+	$(MAKE) opt.threadsafe=1 opt.oom=1 tests clean
+	$(MAKE) opt.threadsafe=1 opt.oom=0 tests clean
+	$(MAKE) opt.threadsafe=2 opt.oom=1 tests clean
+	$(MAKE) opt.threadsafe=2 opt.oom=0 tests clean
 
 
 ########################################################################
@@ -314,7 +329,8 @@ dir.doc   := $(dir.jni)/javadoc
 doc.index := $(dir.doc)/index.html
 $(doc.index): $(JAVA_FILES.main) $(MAKEFILE)
 	@if [ -d $(dir.doc) ]; then rm -fr $(dir.doc)/*; fi
-	$(bin.javadoc) -cp $(classpath) -d $(dir.doc) -quiet org.sqlite.jni
+	$(bin.javadoc) -cp $(classpath) -d $(dir.doc) -quiet \
+		-subpackages org.sqlite.jni -exclude org.sqlite.jni.tester
 	@echo "javadoc output is in $@"
 
 .PHONY: doc javadoc docserve
@@ -323,7 +339,7 @@ doc: $(doc.index)
 javadoc: $(doc.index)
 # Force rebild of docs
 redoc:
-	@rm -f $(doc.index)/index.html
+	@rm -f $(doc.index)
 	@$(MAKE) doc
 docserve: $(doc.index)
 	cd $(dir.doc) && althttpd -max-age 1 -page index.html

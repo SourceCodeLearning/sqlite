@@ -22,7 +22,16 @@ package org.sqlite.jni;
 public interface XDestroyCallback {
   /**
      Must perform any cleanup required by this object. Must not
-     throw.
+     throw. Must not call back into the sqlite3 API, else it might
+     invoke a deadlock.
+
+     WARNING: as a rule, it is never safe to register individual
+     instances with this interface multiple times in the
+     library. e.g., do not register the same CollationCallback with
+     multiple arities or names using sqlite3_create_collation().  If
+     this rule is violated, the library will eventually try to free
+     each individual reference, leading to memory corruption or a
+     crash via duplicate free().
   */
   public void xDestroy();
 }

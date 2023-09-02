@@ -821,6 +821,14 @@ JNIEXPORT jint JNICALL Java_org_sqlite_jni_SQLite3Jni_sqlite3_1bind_1int64
 
 /*
  * Class:     org_sqlite_jni_SQLite3Jni
+ * Method:    sqlite3_bind_java_object
+ * Signature: (Lorg/sqlite/jni/sqlite3_stmt;ILjava/lang/Object;)I
+ */
+JNIEXPORT jint JNICALL Java_org_sqlite_jni_SQLite3Jni_sqlite3_1bind_1java_1object
+  (JNIEnv *, jclass, jobject, jint, jobject);
+
+/*
+ * Class:     org_sqlite_jni_SQLite3Jni
  * Method:    sqlite3_bind_null
  * Signature: (Lorg/sqlite/jni/sqlite3_stmt;I)I
  */
@@ -1037,6 +1045,14 @@ JNIEXPORT jbyteArray JNICALL Java_org_sqlite_jni_SQLite3Jni_sqlite3_1column_1tex
 
 /*
  * Class:     org_sqlite_jni_SQLite3Jni
+ * Method:    sqlite3_column_text
+ * Signature: (Lorg/sqlite/jni/sqlite3_stmt;I)Ljava/lang/String;
+ */
+JNIEXPORT jstring JNICALL Java_org_sqlite_jni_SQLite3Jni_sqlite3_1column_1text
+  (JNIEnv *, jclass, jobject, jint);
+
+/*
+ * Class:     org_sqlite_jni_SQLite3Jni
  * Method:    sqlite3_column_text16
  * Signature: (Lorg/sqlite/jni/sqlite3_stmt;I)Ljava/lang/String;
  */
@@ -1141,14 +1157,6 @@ JNIEXPORT jint JNICALL Java_org_sqlite_jni_SQLite3Jni_sqlite3_1data_1count
 
 /*
  * Class:     org_sqlite_jni_SQLite3Jni
- * Method:    sqlite3_db_filename
- * Signature: (Lorg/sqlite/jni/sqlite3;Ljava/lang/String;)Ljava/lang/String;
- */
-JNIEXPORT jstring JNICALL Java_org_sqlite_jni_SQLite3Jni_sqlite3_1db_1filename
-  (JNIEnv *, jclass, jobject, jstring);
-
-/*
- * Class:     org_sqlite_jni_SQLite3Jni
  * Method:    sqlite3_db_config
  * Signature: (Lorg/sqlite/jni/sqlite3;IILorg/sqlite/jni/OutputPointer/Int32;)I
  */
@@ -1162,6 +1170,22 @@ JNIEXPORT jint JNICALL Java_org_sqlite_jni_SQLite3Jni_sqlite3_1db_1config__Lorg_
  */
 JNIEXPORT jint JNICALL Java_org_sqlite_jni_SQLite3Jni_sqlite3_1db_1config__Lorg_sqlite_jni_sqlite3_2ILjava_lang_String_2
   (JNIEnv *, jclass, jobject, jint, jstring);
+
+/*
+ * Class:     org_sqlite_jni_SQLite3Jni
+ * Method:    sqlite3_db_filename
+ * Signature: (Lorg/sqlite/jni/sqlite3;Ljava/lang/String;)Ljava/lang/String;
+ */
+JNIEXPORT jstring JNICALL Java_org_sqlite_jni_SQLite3Jni_sqlite3_1db_1filename
+  (JNIEnv *, jclass, jobject, jstring);
+
+/*
+ * Class:     org_sqlite_jni_SQLite3Jni
+ * Method:    sqlite3_db_handle
+ * Signature: (Lorg/sqlite/jni/sqlite3_stmt;)Lorg/sqlite/jni/sqlite3;
+ */
+JNIEXPORT jobject JNICALL Java_org_sqlite_jni_SQLite3Jni_sqlite3_1db_1handle
+  (JNIEnv *, jclass, jobject);
 
 /*
  * Class:     org_sqlite_jni_SQLite3Jni
@@ -1525,30 +1549,6 @@ JNIEXPORT void JNICALL Java_org_sqlite_jni_SQLite3Jni_sqlite3_1result_1text64
 
 /*
  * Class:     org_sqlite_jni_SQLite3Jni
- * Method:    sqlite3_shutdown
- * Signature: ()I
- */
-JNIEXPORT jint JNICALL Java_org_sqlite_jni_SQLite3Jni_sqlite3_1shutdown
-  (JNIEnv *, jclass);
-
-/*
- * Class:     org_sqlite_jni_SQLite3Jni
- * Method:    sqlite3_status
- * Signature: (ILorg/sqlite/jni/OutputPointer/Int32;Lorg/sqlite/jni/OutputPointer/Int32;Z)I
- */
-JNIEXPORT jint JNICALL Java_org_sqlite_jni_SQLite3Jni_sqlite3_1status
-  (JNIEnv *, jclass, jint, jobject, jobject, jboolean);
-
-/*
- * Class:     org_sqlite_jni_SQLite3Jni
- * Method:    sqlite3_status64
- * Signature: (ILorg/sqlite/jni/OutputPointer/Int64;Lorg/sqlite/jni/OutputPointer/Int64;Z)I
- */
-JNIEXPORT jint JNICALL Java_org_sqlite_jni_SQLite3Jni_sqlite3_1status64
-  (JNIEnv *, jclass, jint, jobject, jobject, jboolean);
-
-/*
- * Class:     org_sqlite_jni_SQLite3Jni
  * Method:    sqlite3_rollback_hook
  * Signature: (Lorg/sqlite/jni/sqlite3;Lorg/sqlite/jni/RollbackHookCallback;)Lorg/sqlite/jni/RollbackHookCallback;
  */
@@ -1573,6 +1573,14 @@ JNIEXPORT void JNICALL Java_org_sqlite_jni_SQLite3Jni_sqlite3_1set_1last_1insert
 
 /*
  * Class:     org_sqlite_jni_SQLite3Jni
+ * Method:    sqlite3_shutdown
+ * Signature: ()I
+ */
+JNIEXPORT jint JNICALL Java_org_sqlite_jni_SQLite3Jni_sqlite3_1shutdown
+  (JNIEnv *, jclass);
+
+/*
+ * Class:     org_sqlite_jni_SQLite3Jni
  * Method:    sqlite3_sleep
  * Signature: (I)I
  */
@@ -1594,6 +1602,22 @@ JNIEXPORT jstring JNICALL Java_org_sqlite_jni_SQLite3Jni_sqlite3_1sourceid
  */
 JNIEXPORT jstring JNICALL Java_org_sqlite_jni_SQLite3Jni_sqlite3_1sql
   (JNIEnv *, jclass, jobject);
+
+/*
+ * Class:     org_sqlite_jni_SQLite3Jni
+ * Method:    sqlite3_status
+ * Signature: (ILorg/sqlite/jni/OutputPointer/Int32;Lorg/sqlite/jni/OutputPointer/Int32;Z)I
+ */
+JNIEXPORT jint JNICALL Java_org_sqlite_jni_SQLite3Jni_sqlite3_1status
+  (JNIEnv *, jclass, jint, jobject, jobject, jboolean);
+
+/*
+ * Class:     org_sqlite_jni_SQLite3Jni
+ * Method:    sqlite3_status64
+ * Signature: (ILorg/sqlite/jni/OutputPointer/Int64;Lorg/sqlite/jni/OutputPointer/Int64;Z)I
+ */
+JNIEXPORT jint JNICALL Java_org_sqlite_jni_SQLite3Jni_sqlite3_1status64
+  (JNIEnv *, jclass, jint, jobject, jobject, jboolean);
 
 /*
  * Class:     org_sqlite_jni_SQLite3Jni
@@ -1693,10 +1717,10 @@ JNIEXPORT jdouble JNICALL Java_org_sqlite_jni_SQLite3Jni_sqlite3_1value_1double
 
 /*
  * Class:     org_sqlite_jni_SQLite3Jni
- * Method:    sqlite3_value_dupe
+ * Method:    sqlite3_value_dup
  * Signature: (Lorg/sqlite/jni/sqlite3_value;)Lorg/sqlite/jni/sqlite3_value;
  */
-JNIEXPORT jobject JNICALL Java_org_sqlite_jni_SQLite3Jni_sqlite3_1value_1dupe
+JNIEXPORT jobject JNICALL Java_org_sqlite_jni_SQLite3Jni_sqlite3_1value_1dup
   (JNIEnv *, jclass, jobject);
 
 /*
@@ -1749,10 +1773,18 @@ JNIEXPORT jbyteArray JNICALL Java_org_sqlite_jni_SQLite3Jni_sqlite3_1value_1text
 
 /*
  * Class:     org_sqlite_jni_SQLite3Jni
- * Method:    sqlite3_value_text16
- * Signature: (Lorg/sqlite/jni/sqlite3_value;)[B
+ * Method:    sqlite3_value_text
+ * Signature: (Lorg/sqlite/jni/sqlite3_value;)Ljava/lang/String;
  */
-JNIEXPORT jbyteArray JNICALL Java_org_sqlite_jni_SQLite3Jni_sqlite3_1value_1text16
+JNIEXPORT jstring JNICALL Java_org_sqlite_jni_SQLite3Jni_sqlite3_1value_1text
+  (JNIEnv *, jclass, jobject);
+
+/*
+ * Class:     org_sqlite_jni_SQLite3Jni
+ * Method:    sqlite3_value_text16
+ * Signature: (Lorg/sqlite/jni/sqlite3_value;)Ljava/lang/String;
+ */
+JNIEXPORT jstring JNICALL Java_org_sqlite_jni_SQLite3Jni_sqlite3_1value_1text16
   (JNIEnv *, jclass, jobject);
 
 /*
