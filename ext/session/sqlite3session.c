@@ -603,8 +603,10 @@ static int sessionPreupdateHash(
 ** the type byte).
 */
 static int sessionSerialLen(const u8 *a){
-  int e = *a;
+  int e;
   int n;
+  assert( a!=0 );
+  e = *a;
   if( e==0 || e==0xFF ) return 1;
   if( e==SQLITE_NULL ) return 1;
   if( e==SQLITE_INTEGER || e==SQLITE_FLOAT ) return 9;
@@ -1266,7 +1268,7 @@ static int sessionReinitTable(sqlite3_session *pSession, SessionTable *pTab){
     }
   }
 
-  sqlite3_free(azCol);
+  sqlite3_free((char*)azCol);
   return pSession->rc;
 }
 
@@ -5326,6 +5328,7 @@ int sqlite3changeset_apply_v2(
 
   if( flags & SQLITE_CHANGESETAPPLY_FKNOACTION ){
     db->flags |= ((u64)SQLITE_FkNoAction);
+    db->aDb[0].pSchema->schema_cookie -= 32;
   }
 
   if( rc==SQLITE_OK ){
@@ -5336,7 +5339,8 @@ int sqlite3changeset_apply_v2(
 
   if( (flags & SQLITE_CHANGESETAPPLY_FKNOACTION) && savedFlag==0 ){
     assert( db->flags & SQLITE_FkNoAction );
-    db->flags &= ((u64)SQLITE_FkNoAction);
+    db->flags &= ~((u64)SQLITE_FkNoAction);
+    db->aDb[0].pSchema->schema_cookie -= 32;
   }
   return rc;
 }
@@ -5448,6 +5452,7 @@ static int sessionChangeMerge(
 ){
   SessionChange *pNew = 0;
   int rc = SQLITE_OK;
+  assert( aRec!=0 );
 
   if( !pExist ){
     pNew = (SessionChange *)sqlite3_malloc64(sizeof(SessionChange) + nRec);
