@@ -1311,7 +1311,11 @@ static void shellDtostr(
   char z[400];
   if( n<1 ) n = 1;
   if( n>350 ) n = 350;
+#if defined(_MSC_VER)
+  _snprintf(z, sizeof(z)-2, "%#+.*e", n, r);
+#else
   snprintf(z, sizeof(z)-1, "%#+.*e", n, r);
+#endif
   sqlite3_result_text(pCtx, z, -1, SQLITE_TRANSIENT);
 }
 
@@ -10074,8 +10078,14 @@ static int do_meta_command(char *zLine, ShellState *p){
       sqlite3_db_config(
           p->db, SQLITE_DBCONFIG_STMT_SCANSTATUS, p->scanstatsOn, (int*)0
       );
-#ifndef SQLITE_ENABLE_STMT_SCANSTATUS
+#if !defined(SQLITE_ENABLE_STMT_SCANSTATUS)
       raw_printf(stderr, "Warning: .scanstats not available in this build.\n");
+#elif !defined(SQLITE_ENABLE_BYTECODE_VTAB)
+      if( p->scanstatsOn==3 ){
+        raw_printf(stderr, 
+            "Warning: \".scanstats vm\" not available in this build.\n"
+        );
+      }
 #endif
     }else{
       raw_printf(stderr, "Usage: .scanstats on|off|est\n");
