@@ -2245,8 +2245,20 @@ void sqlite3WhereClausePrint(WhereClause *pWC){
 #ifdef WHERETRACE_ENABLED
 /*
 ** Print a WhereLoop object for debugging purposes
+**
+** Format example:
+**
+**     .--- Position in WHERE clause           rSetup, rRun, nOut ---.
+**     |                                                             |
+**     |  .--- selfMask                       nTerm ------.          |
+**     |  |                                               |          |
+**     |  |   .-- prereq    Idx          wsFlags----.     |          |
+**     |  |   |             Name                    |     |          |
+**     |  |   |           __|__        nEq ---.  ___|__   |        __|__
+**     | / \ / \         /     \              | /      \ / \      /     \
+**     1.002.001         t2.t2xy              2 f 010241 N 2 cost 0,56,31
 */
-void sqlite3WhereLoopPrint(WhereLoop *p, WhereClause *pWC){
+void sqlite3WhereLoopPrint(const WhereLoop *p, const WhereClause *pWC){
   WhereInfo *pWInfo = pWC->pWInfo;
   int nb = 1+(pWInfo->pTabList->nSrc+3)/4;
   SrcItem *pItem = pWInfo->pTabList->a + p->iTab;
@@ -6038,7 +6050,10 @@ WhereInfo *sqlite3WhereBegin(
   ** field (type Bitmask) it must be aligned on an 8-byte boundary on
   ** some architectures. Hence the ROUND8() below.
   */
-  nByteWInfo = ROUND8P(sizeof(WhereInfo)+(nTabList-1)*sizeof(WhereLevel));
+  nByteWInfo = ROUND8P(sizeof(WhereInfo));
+  if( nTabList>1 ){
+    nByteWInfo = ROUND8P(nByteWInfo + (nTabList-1)*sizeof(WhereLevel));
+  }
   pWInfo = sqlite3DbMallocRawNN(db, nByteWInfo + sizeof(WhereLoop));
   if( db->mallocFailed ){
     sqlite3DbFree(db, pWInfo);
