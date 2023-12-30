@@ -2259,15 +2259,20 @@ void sqlite3WhereClausePrint(WhereClause *pWC){
 **     1.002.001         t2.t2xy              2 f 010241 N 2 cost 0,56,31
 */
 void sqlite3WhereLoopPrint(const WhereLoop *p, const WhereClause *pWC){
-  WhereInfo *pWInfo = pWC->pWInfo;
-  int nb = 1+(pWInfo->pTabList->nSrc+3)/4;
-  SrcItem *pItem = pWInfo->pTabList->a + p->iTab;
-  Table *pTab = pItem->pTab;
-  Bitmask mAll = (((Bitmask)1)<<(nb*4)) - 1;
-  sqlite3DebugPrintf("%c%2d.%0*llx.%0*llx", p->cId,
-                     p->iTab, nb, p->maskSelf, nb, p->prereq & mAll);
-  sqlite3DebugPrintf(" %12s",
-                     pItem->zAlias ? pItem->zAlias : pTab->zName);
+  if( pWC ){
+    WhereInfo *pWInfo = pWC->pWInfo;
+    int nb = 1+(pWInfo->pTabList->nSrc+3)/4;
+    SrcItem *pItem = pWInfo->pTabList->a + p->iTab;
+    Table *pTab = pItem->pTab;
+    Bitmask mAll = (((Bitmask)1)<<(nb*4)) - 1;
+    sqlite3DebugPrintf("%c%2d.%0*llx.%0*llx", p->cId,
+                       p->iTab, nb, p->maskSelf, nb, p->prereq & mAll);
+    sqlite3DebugPrintf(" %12s",
+                       pItem->zAlias ? pItem->zAlias : pTab->zName);
+  }else{
+    sqlite3DebugPrintf("%c%2d.%03llx.%03llx %c%d",
+         p->cId, p->iTab, p->maskSelf, p->prereq & 0xfff, p->cId, p->iTab);
+  }
   if( (p->wsFlags & WHERE_VIRTUALTABLE)==0 ){
     const char *zName;
     if( p->u.btree.pIndex && (zName = p->u.btree.pIndex->zName)!=0 ){
@@ -2302,6 +2307,15 @@ void sqlite3WhereLoopPrint(const WhereLoop *p, const WhereClause *pWC){
     for(i=0; i<p->nLTerm; i++){
       sqlite3WhereTermPrint(p->aLTerm[i], i);
     }
+  }
+}
+void sqlite3ShowWhereLoop(const WhereLoop *p){
+  if( p ) sqlite3WhereLoopPrint(p, 0);
+}
+void sqlite3ShowWhereLoopList(const WhereLoop *p){
+  while( p ){
+    sqlite3ShowWhereLoop(p);
+    p = p->pNextLoop;
   }
 }
 #endif
@@ -2416,46 +2430,60 @@ static void whereInfoFree(sqlite3 *db, WhereInfo *pWInfo){
 }
 
 /*
-** Return TRUE if all of the following are true:
+** Return TRUE if X is a proper subset of Y but is of equal or less cost.
+** In other words, return true if all constraints of X are also part of Y
+** and Y has additional constraints that might speed the search that X lacks
+** but the cost of running X is not more than the cost of running Y.
 **
-**   (1)  X has the same or lower cost, or returns the same or fewer rows,
-**        than Y.
-**   (2)  X uses fewer WHERE clause terms than Y
-**   (3)  Every WHERE clause term used by X is also used by Y
-**   (4)  X skips at least as many columns as Y
-**   (5)  If X is a covering index, than Y is too
+** In other words, return true if the cost relationwship between X and Y
+** is inverted and needs to be adjusted.
 **
-** Conditions (2) and (3) mean that X is a "proper subset" of Y.
-** If X is a proper subset of Y then Y is a better choice and ought
-** to have a lower cost.  This routine returns TRUE when that cost
-** relationship is inverted and needs to be adjusted.  Constraint (4)
-** was added because if X uses skip-scan less than Y it still might
-** deserve a lower cost even if it is a proper subset of Y.  Constraint (5)
-** was added because a covering index probably deserves to have a lower cost
-** than a non-covering index even if it is a proper subset.
+** Case 1:
+**
+**   (1a)  X and Y use the same index.
+**   (1b)  X has fewer == terms than Y
+**   (1c)  Neither X nor Y use skip-scan
+**   (1d)  X does not have a a greater cost than Y
+**
+** Case 2:
+**
+**   (2a)  X has the same or lower cost, or returns the same or fewer rows,
+**         than Y.
+**   (2b)  X uses fewer WHERE clause terms than Y
+**   (2c)  Every WHERE clause term used by X is also used by Y
+**   (2d)  X skips at least as many columns as Y
+**   (2e)  If X is a covering index, than Y is too
 */
 static int whereLoopCheaperProperSubset(
   const WhereLoop *pX,       /* First WhereLoop to compare */
   const WhereLoop *pY        /* Compare against this WhereLoop */
 ){
   int i, j;
-  if( pX->nLTerm-pX->nSkip >= pY->nLTerm-pY->nSkip ){
-    return 0; /* X is not a subset of Y */
+  if( pX->rRun>pY->rRun && pX->nOut>pY->nOut ) return 0; /* (1d) and (2a) */
+  assert( (pX->wsFlags & WHERE_VIRTUALTABLE)==0 );
+  assert( (pY->wsFlags & WHERE_VIRTUALTABLE)==0 );
+  if( pX->u.btree.nEq < pY->u.btree.nEq                  /* (1b) */
+   && pX->u.btree.pIndex==pY->u.btree.pIndex             /* (1a) */
+   && pX->nSkip==0 && pY->nSkip==0                       /* (1c) */
+  ){
+    return 1;  /* Case 1 is true */
   }
-  if( pX->rRun>pY->rRun && pX->nOut>pY->nOut ) return 0;
-  if( pY->nSkip > pX->nSkip ) return 0;
+  if( pX->nLTerm-pX->nSkip >= pY->nLTerm-pY->nSkip ){
+    return 0;                                            /* (2b) */
+  }
+  if( pY->nSkip > pX->nSkip ) return 0;                  /* (2d) */
   for(i=pX->nLTerm-1; i>=0; i--){
     if( pX->aLTerm[i]==0 ) continue;
     for(j=pY->nLTerm-1; j>=0; j--){
       if( pY->aLTerm[j]==pX->aLTerm[i] ) break;
     }
-    if( j<0 ) return 0;  /* X not a subset of Y since term X[i] not used by Y */
+    if( j<0 ) return 0;                                  /* (2c) */
   }
   if( (pX->wsFlags&WHERE_IDX_ONLY)!=0
    && (pY->wsFlags&WHERE_IDX_ONLY)==0 ){
-    return 0;  /* Constraint (5) */
+    return 0;                                            /* (2e) */
   }
-  return 1;  /* All conditions meet */
+  return 1;  /* Case 2 is true */
 }
 
 /*
@@ -6615,6 +6643,11 @@ whereBeginError:
     pParse->nQueryLoop = pWInfo->savedNQueryLoop;
     whereInfoFree(db, pWInfo);
   }
+#ifdef WHERETRACE_ENABLED
+  /* Prevent harmless compiler warnings about debugging routines
+  ** being declared but never used */
+  sqlite3ShowWhereLoopList(0);
+#endif /* WHERETRACE_ENABLED */
   return 0;
 }
 

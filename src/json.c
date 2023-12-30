@@ -214,6 +214,12 @@ typedef struct JsonParse JsonParse;
 #define JSON_CACHE_ID    (-429938)  /* Cache entry */
 #define JSON_CACHE_SIZE  4          /* Max number of cache entries */
 
+/*
+** jsonUnescapeOneChar() returns this invalid code point if it encounters
+** a syntax error.
+*/
+#define JSON_INVALID_CHAR 0x99999
+
 /* A cache mapping JSON text into JSONB blobs.
 **
 ** Each cache entry is a JsonParse object with the following restrictions:
@@ -621,8 +627,33 @@ static void jsonAppendString(JsonString *p, const char *zIn, u32 N){
   p->zBuf[p->nUsed++] = '"';
   while( 1 /*exit-by-break*/ ){
     k = 0;
-    while( k+1<N && jsonIsOk[z[k]] && jsonIsOk[z[k+1]] ){ k += 2; } /* <--, */
-    while( k<N && jsonIsOk[z[k]] ){ k++; }    /* <-- loop unwound for speed  */
+    /* The following while() is the 4-way unwound equivalent of
+    **
+    **     while( k<N && jsonIsOk[z[k]] ){ k++; }
+    */
+    while( 1 /* Exit by break */ ){
+      if( k+3>=N ){
+        while( k<N && jsonIsOk[z[k]] ){ k++; }
+        break;
+      }
+      if( !jsonIsOk[z[k]] ){
+        break;
+      }
+      if( !jsonIsOk[z[k+1]] ){
+        k += 1;
+        break;
+      }
+      if( !jsonIsOk[z[k+2]] ){
+        k += 2;
+        break;
+      }
+      if( !jsonIsOk[z[k+3]] ){
+        k += 3;
+        break;
+      }else{
+        k += 4;
+      }
+    }
     if( k>=N ){
       if( k>0 ){
         memcpy(&p->zBuf[p->nUsed], z, k);
@@ -1380,7 +1411,7 @@ static u32 jsonbValidityCheck(
           }else{
             u32 c = 0;
             u32 szC = jsonUnescapeOneChar((const char*)&z[j], k-j, &c);
-            if( c==0xfffd ) return j+1;
+            if( c==JSON_INVALID_CHAR ) return j+1;
             j += szC - 1;
           }
         }
@@ -2390,19 +2421,23 @@ static u32 jsonBytesToBypass(const char *z, u32 n){
 ** Input z[0..n] defines JSON escape sequence including the leading '\\'.
 ** Decode that escape sequence into a single character.  Write that
 ** character into *piOut.  Return the number of bytes in the escape sequence.
+**
+** If there is a syntax error of some kind (for example too few characters
+** after the '\\' to complete the encoding) then *piOut is set to
+** JSON_INVALID_CHAR.
 */
 static u32 jsonUnescapeOneChar(const char *z, u32 n, u32 *piOut){
   assert( n>0 );
   assert( z[0]=='\\' );
   if( n<2 ){
-    *piOut = 0xFFFD;
+    *piOut = JSON_INVALID_CHAR;
     return n;
   }
   switch( (u8)z[1] ){
     case 'u': {
       u32 v, vlo;
       if( n<6 ){
-        *piOut = 0xFFFD;
+        *piOut = JSON_INVALID_CHAR;
         return n;
       }
       v = jsonHexToInt4(&z[2]);
@@ -2432,7 +2467,7 @@ static u32 jsonUnescapeOneChar(const char *z, u32 n, u32 *piOut){
     case '\\':{   *piOut = z[1];  return 2; }
     case 'x': {
       if( n<4 ){
-        *piOut = 0xFFFD;
+        *piOut = JSON_INVALID_CHAR;
         return n;
       }
       *piOut = (jsonHexToInt(z[2])<<4) | jsonHexToInt(z[3]);
@@ -2443,7 +2478,7 @@ static u32 jsonUnescapeOneChar(const char *z, u32 n, u32 *piOut){
     case '\n': {
       u32 nSkip = jsonBytesToBypass(z, n);
       if( nSkip==0 ){
-        *piOut = 0xFFFD;
+        *piOut = JSON_INVALID_CHAR;
         return n;
       }else if( nSkip==n ){
         *piOut = 0;
@@ -2456,7 +2491,7 @@ static u32 jsonUnescapeOneChar(const char *z, u32 n, u32 *piOut){
       }
     }
     default: {
-      *piOut = 0xFFFD;
+      *piOut = JSON_INVALID_CHAR;
       return 2;
     }
   }
@@ -2930,8 +2965,6 @@ static void jsonReturnFromBlob(
           u32 szEscape = jsonUnescapeOneChar(&z[iIn], sz-iIn, &v);
           if( v<=0x7f ){
             zOut[iOut++] = (char)v;
-          }else if( v==0xfffd ){
-            /* Silently ignore illegal unicode */
           }else if( v<=0x7ff ){
             assert( szEscape>=2 );
             zOut[iOut++] = (char)(0xc0 | (v>>6));
@@ -2941,6 +2974,8 @@ static void jsonReturnFromBlob(
             zOut[iOut++] = 0xe0 | (v>>12);
             zOut[iOut++] = 0x80 | ((v>>6)&0x3f);
             zOut[iOut++] = 0x80 | (v&0x3f);
+          }else if( v==JSON_INVALID_CHAR ){
+            /* Silently ignore illegal unicode */
           }else{
             assert( szEscape>=4 );
             zOut[iOut++] = 0xf0 | (v>>18);
@@ -3341,14 +3376,15 @@ static void jsonDebugPrintBlob(
   JsonParse *pParse, /* JSON content */
   u32 iStart,        /* Start rendering here */
   u32 iEnd,          /* Do not render this byte or any byte after this one */
-  int nIndent        /* Indent by this many spaces */
+  int nIndent,       /* Indent by this many spaces */
+  sqlite3_str *pOut  /* Generate output into this sqlite3_str object */
 ){
   while( iStart<iEnd ){
     u32 i, n, nn, sz = 0;
     int showContent = 1;
     u8 x = pParse->aBlob[iStart] & 0x0f;
     u32 savedNBlob = pParse->nBlob;
-    printf("%5d:%*s", iStart, nIndent, "");
+    sqlite3_str_appendf(pOut, "%5d:%*s", iStart, nIndent, "");
     if( pParse->nBlobAlloc>pParse->nBlob ){
       pParse->nBlob = pParse->nBlobAlloc;
     }
@@ -3357,9 +3393,11 @@ static void jsonDebugPrintBlob(
     if( sz>0 && x<JSONB_ARRAY ){
       nn += sz;
     }
-    for(i=0; i<nn; i++) printf(" %02x", pParse->aBlob[iStart+i]);
+    for(i=0; i<nn; i++){
+      sqlite3_str_appendf(pOut, " %02x", pParse->aBlob[iStart+i]);
+    }
     if( n==0 ){
-      printf("   ERROR invalid node size\n");
+      sqlite3_str_appendf(pOut, "   ERROR invalid node size\n");
       iStart = n==0 ? iStart+1 : iEnd;
       continue;
     }
@@ -3374,55 +3412,57 @@ static void jsonDebugPrintBlob(
         }
       }
     }
-    printf("  <-- ");
+    sqlite3_str_appendall(pOut,"  <-- ");
     switch( x ){
-      case JSONB_NULL:     printf("null"); break;
-      case JSONB_TRUE:     printf("true"); break;
-      case JSONB_FALSE:    printf("false"); break;
-      case JSONB_INT:      printf("int"); break;
-      case JSONB_INT5:     printf("int5"); break;
-      case JSONB_FLOAT:    printf("float"); break;
-      case JSONB_FLOAT5:   printf("float5"); break;
-      case JSONB_TEXT:     printf("text"); break;
-      case JSONB_TEXTJ:    printf("textj"); break;
-      case JSONB_TEXT5:    printf("text5"); break;
-      case JSONB_TEXTRAW:  printf("textraw"); break;
+      case JSONB_NULL:     sqlite3_str_appendall(pOut,"null"); break;
+      case JSONB_TRUE:     sqlite3_str_appendall(pOut,"true"); break;
+      case JSONB_FALSE:    sqlite3_str_appendall(pOut,"false"); break;
+      case JSONB_INT:      sqlite3_str_appendall(pOut,"int"); break;
+      case JSONB_INT5:     sqlite3_str_appendall(pOut,"int5"); break;
+      case JSONB_FLOAT:    sqlite3_str_appendall(pOut,"float"); break;
+      case JSONB_FLOAT5:   sqlite3_str_appendall(pOut,"float5"); break;
+      case JSONB_TEXT:     sqlite3_str_appendall(pOut,"text"); break;
+      case JSONB_TEXTJ:    sqlite3_str_appendall(pOut,"textj"); break;
+      case JSONB_TEXT5:    sqlite3_str_appendall(pOut,"text5"); break;
+      case JSONB_TEXTRAW:  sqlite3_str_appendall(pOut,"textraw"); break;
       case JSONB_ARRAY: {
-        printf("array, %u bytes\n", sz);
-        jsonDebugPrintBlob(pParse, iStart+n, iStart+n+sz, nIndent+2);
+        sqlite3_str_appendf(pOut,"array, %u bytes\n", sz);
+        jsonDebugPrintBlob(pParse, iStart+n, iStart+n+sz, nIndent+2, pOut);
         showContent = 0;
         break;
       }
       case JSONB_OBJECT: {
-        printf("object, %u bytes\n", sz);
-        jsonDebugPrintBlob(pParse, iStart+n, iStart+n+sz, nIndent+2);
+        sqlite3_str_appendf(pOut, "object, %u bytes\n", sz);
+        jsonDebugPrintBlob(pParse, iStart+n, iStart+n+sz, nIndent+2, pOut);
         showContent = 0;
         break;
       }
       default: {
-        printf("ERROR: unknown node type\n");
+        sqlite3_str_appendall(pOut, "ERROR: unknown node type\n");
         showContent = 0;
         break;
       }
     }
     if( showContent ){
       if( sz==0 && x<=JSONB_FALSE ){
-        printf("\n");
+        sqlite3_str_append(pOut, "\n", 1);
       }else{
         u32 i;
-        printf(": \"");
+        sqlite3_str_appendall(pOut, ": \"");
         for(i=iStart+n; i<iStart+n+sz; i++){
           u8 c = pParse->aBlob[i];
           if( c<0x20 || c>=0x7f ) c = '.';
-          putchar(c);
+          sqlite3_str_append(pOut, (char*)&c, 1);
         }
-        printf("\"\n");
+        sqlite3_str_append(pOut, "\"\n", 2);
       }
     }
     iStart += n + sz;
   }
 }
 static void jsonShowParse(JsonParse *pParse){
+  sqlite3_str out;
+  char zBuf[1000];
   if( pParse==0 ){
     printf("NULL pointer\n");
     return;
@@ -3433,7 +3473,10 @@ static void jsonShowParse(JsonParse *pParse){
     if( pParse->nBlob==0 ) return;
     printf("content (bytes 0..%u):\n", pParse->nBlob-1);
   }
-  jsonDebugPrintBlob(pParse, 0, pParse->nBlob, 0);
+  sqlite3StrAccumInit(&out, 0, zBuf, sizeof(zBuf), 1000000);
+  jsonDebugPrintBlob(pParse, 0, pParse->nBlob, 0, &out);
+  printf("%s", sqlite3_str_value(&out));
+  sqlite3_str_reset(&out);
 }
 #endif /* SQLITE_DEBUG */
 
@@ -3441,8 +3484,8 @@ static void jsonShowParse(JsonParse *pParse){
 /*
 ** SQL function:   json_parse(JSON)
 **
-** Parse JSON using jsonParseFuncArg().  Then print a dump of that
-** parse on standard output.
+** Parse JSON using jsonParseFuncArg().  Return text that is a
+** human-readable dump of the binary JSONB for the input parameter.
 */
 static void jsonParseFunc(
   sqlite3_context *ctx,
@@ -3450,10 +3493,18 @@ static void jsonParseFunc(
   sqlite3_value **argv
 ){
   JsonParse *p;        /* The parse */
+  sqlite3_str out;
 
-  assert( argc==1 );
+  assert( argc>=1 );
+  sqlite3StrAccumInit(&out, 0, 0, 0, 1000000);
   p = jsonParseFuncArg(ctx, argv[0], 0);
-  jsonShowParse(p);
+  if( p==0 ) return;
+  if( argc==1 ){
+    jsonDebugPrintBlob(p, 0, p->nBlob, 0, &out);
+    sqlite3_result_text64(ctx, out.zText, out.nChar, sqlite3_free, SQLITE_UTF8);
+  }else{
+    jsonShowParse(p);
+  }
   jsonParseFree(p);
 }
 #endif /* SQLITE_DEBUG */
