@@ -1897,6 +1897,7 @@ void sqlite3Pragma(
               ** is REAL, we have to load the actual data using OP_Column
               ** to reliably determine if the value is a NULL. */
               sqlite3VdbeAddOp3(v, OP_Column, p1, p3, 3);
+              sqlite3ColumnDefault(v, pTab, j, 3);
               jmp3 = sqlite3VdbeAddOp2(v, OP_NotNull, 3, labelOk);
               VdbeCoverage(v);
             }           
@@ -2449,7 +2450,7 @@ void sqlite3Pragma(
         /* If table pTab has not been used in a way that would benefit from
         ** having analysis statistics during the current session, then skip it.
         ** This also has the effect of skipping virtual tables and views */
-        if( (pTab->tabFlags & TF_StatsUsed)==0 ) continue;
+        if( (pTab->tabFlags & TF_MaybeReanalyze)==0 ) continue;
 
         /* Reanalyze if the table is 25 times larger than the last analysis */
         szThreshold = pTab->nRowLogEst + 46; assert( sqlite3LogEst(25)==46 );
