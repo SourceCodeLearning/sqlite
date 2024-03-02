@@ -7007,7 +7007,10 @@ static int fillInCell(
     n = nHeader + nPayload;
     testcase( n==3 );
     testcase( n==4 );
-    if( n<4 ) n = 4;
+    if( n<4 ){
+      n = 4;
+      pPayload[nPayload] = 0;
+    }
     *pnSize = n;
     assert( nSrc<=nPayload );
     testcase( nSrc<nPayload );
@@ -9453,7 +9456,10 @@ int sqlite3BtreeInsert(
   if( flags & BTREE_PREFORMAT ){
     rc = SQLITE_OK;
     szNew = p->pBt->nPreformatSize;
-    if( szNew<4 ) szNew = 4;
+    if( szNew<4 ){
+      szNew = 4;
+      newCell[3] = 0;
+    }
     if( ISAUTOVACUUM(p->pBt) && szNew>pPage->maxLocal ){
       CellInfo info;
       pPage->xParseCell(pPage, newCell, &info);
@@ -10794,6 +10800,9 @@ static int checkTreePage(
   ** number of cells on the page. */
   nCell = get2byte(&data[hdr+3]);
   assert( pPage->nCell==nCell );
+  if( pPage->leaf || pPage->intKey==0 ){
+    pCheck->nRow += nCell;
+  }
 
   /* EVIDENCE-OF: R-23882-45353 The cell pointer array of a b-tree page
   ** immediately follows the b-tree page header. */
@@ -10905,6 +10914,7 @@ static int checkTreePage(
         btreeHeapInsert(heap, (pc<<16)|(pc+size-1));
       }
     }
+    assert( heap!=0 );
     /* Add the freeblocks to the min-heap
     **
     ** EVIDENCE-OF: R-20690-50594 The second field of the b-tree page header
@@ -11004,6 +11014,7 @@ int sqlite3BtreeIntegrityCheck(
   sqlite3 *db,  /* Database connection that is running the check */
   Btree *p,     /* The btree to be checked */
   Pgno *aRoot,  /* An array of root pages numbers for individual trees */
+  Mem *aCnt,    /* Memory cells to write counts for each tree to */
   int nRoot,    /* Number of entries in aRoot[] */
   int mxErr,    /* Stop reporting errors after this many */
   int *pnErr,   /* OUT: Write number of errors seen to this variable */
@@ -11017,7 +11028,9 @@ int sqlite3BtreeIntegrityCheck(
   int bPartial = 0;            /* True if not checking all btrees */
   int bCkFreelist = 1;         /* True to scan the freelist */
   VVA_ONLY( int nRef );
+
   assert( nRoot>0 );
+  assert( aCnt!=0 );
 
   /* aRoot[0]==0 means this is a partial check */
   if( aRoot[0]==0 ){
@@ -11090,15 +11103,18 @@ int sqlite3BtreeIntegrityCheck(
   testcase( pBt->db->flags & SQLITE_CellSizeCk );
   pBt->db->flags &= ~(u64)SQLITE_CellSizeCk;
   for(i=0; (int)i<nRoot && sCheck.mxErr; i++){
-    i64 notUsed;
-    if( aRoot[i]==0 ) continue;
+    sCheck.nRow = 0;
+    if( aRoot[i] ){
+      i64 notUsed;
 #ifndef SQLITE_OMIT_AUTOVACUUM
-    if( pBt->autoVacuum && aRoot[i]>1 && !bPartial ){
-      checkPtrmap(&sCheck, aRoot[i], PTRMAP_ROOTPAGE, 0);
-    }
+      if( pBt->autoVacuum && aRoot[i]>1 && !bPartial ){
+        checkPtrmap(&sCheck, aRoot[i], PTRMAP_ROOTPAGE, 0);
+      }
 #endif
-    sCheck.v0 = aRoot[i];
-    checkTreePage(&sCheck, aRoot[i], &notUsed, LARGEST_INT64);
+      sCheck.v0 = aRoot[i];
+      checkTreePage(&sCheck, aRoot[i], &notUsed, LARGEST_INT64);
+    }
+    sqlite3MemSetArrayInt64(aCnt, i, sCheck.nRow);
   }
   pBt->db->flags = savedDbFlags;
 
