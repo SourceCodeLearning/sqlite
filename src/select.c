@@ -1673,9 +1673,16 @@ static void generateSortTail(
   int addrExplain;                /* Address of OP_Explain instruction */
 #endif
 
-  ExplainQueryPlan2(addrExplain, (pParse, 0,
-        "USE TEMP B-TREE FOR %sORDER BY", pSort->nOBSat>0?"RIGHT PART OF ":"")
-  );
+  nKey = pOrderBy->nExpr - pSort->nOBSat;
+  if( pSort->nOBSat==0 || nKey==1 ){
+    ExplainQueryPlan2(addrExplain, (pParse, 0,
+      "USE TEMP B-TREE FOR %sORDER BY", pSort->nOBSat?"LAST TERM OF ":""
+    ));
+  }else{
+    ExplainQueryPlan2(addrExplain, (pParse, 0,
+      "USE TEMP B-TREE FOR LAST %d TERMS OF ORDER BY", nKey
+    ));
+  }
   sqlite3VdbeScanStatusRange(v, addrExplain,pSort->addrPush,pSort->addrPushEnd);
   sqlite3VdbeScanStatusCounters(v, addrExplain, addrExplain, pSort->addrPush);
 
@@ -1713,7 +1720,6 @@ static void generateSortTail(
       regRow = sqlite3GetTempRange(pParse, nColumn);
     }
   }
-  nKey = pOrderBy->nExpr - pSort->nOBSat;
   if( pSort->sortFlags & SORTFLAG_UseSorter ){
     int regSortOut = ++pParse->nMem;
     iSortTab = pParse->nTab++;
@@ -1953,11 +1959,7 @@ static const char *columnTypeImpl(
         ** data for the result-set column of the sub-select.
         */
         if( iCol<pS->pEList->nExpr
-#ifdef SQLITE_ALLOW_ROWID_IN_VIEW
-         && iCol>=0
-#else
-         && ALWAYS(iCol>=0)
-#endif
+         && (!ViewCanHaveRowid || iCol>=0)
         ){
           /* If iCol is less than zero, then the expression requests the
           ** rowid of the sub-select or view. This expression is legal (see
@@ -4776,7 +4778,7 @@ static void constInsert(
 ){
   int i;
   assert( pColumn->op==TK_COLUMN );
-  assert( sqlite3ExprIsConstant(pValue) );
+  assert( sqlite3ExprIsConstant(pConst->pParse, pValue) );
 
   if( ExprHasProperty(pColumn, EP_FixedCol) ) return;
   if( sqlite3ExprAffinity(pValue)!=0 ) return;
@@ -4834,10 +4836,10 @@ static void findConstInWhere(WhereConst *pConst, Expr *pExpr){
   pLeft = pExpr->pLeft;
   assert( pRight!=0 );
   assert( pLeft!=0 );
-  if( pRight->op==TK_COLUMN && sqlite3ExprIsConstant(pLeft) ){
+  if( pRight->op==TK_COLUMN && sqlite3ExprIsConstant(pConst->pParse, pLeft) ){
     constInsert(pConst,pRight,pLeft,pExpr);
   }
-  if( pLeft->op==TK_COLUMN && sqlite3ExprIsConstant(pRight) ){
+  if( pLeft->op==TK_COLUMN && sqlite3ExprIsConstant(pConst->pParse, pRight) ){
     constInsert(pConst,pLeft,pRight,pExpr);
   }
 }
@@ -5874,7 +5876,8 @@ int sqlite3ExpandSubquery(Parse *pParse, SrcItem *pFrom){
   /* The usual case - do not allow ROWID on a subquery */
   pTab->tabFlags |= TF_Ephemeral | TF_NoVisibleRowid;
 #else
-  pTab->tabFlags |= TF_Ephemeral;  /* Legacy compatibility mode */
+  /* Legacy compatibility mode */
+  pTab->tabFlags |= TF_Ephemeral | sqlite3Config.mNoVisibleRowid;
 #endif
   return pParse->nErr ? SQLITE_ERROR : SQLITE_OK;
 }
@@ -6142,7 +6145,7 @@ static int selectExpander(Walker *pWalker, Select *p){
             pNestedFrom = pFrom->pSelect->pEList;
             assert( pNestedFrom!=0 );
             assert( pNestedFrom->nExpr==pTab->nCol );
-            assert( VisibleRowid(pTab)==0 );
+            assert( VisibleRowid(pTab)==0 || ViewCanHaveRowid );
           }else{
             if( zTName && sqlite3StrICmp(zTName, zTabName)!=0 ){
               continue;
@@ -6174,7 +6177,8 @@ static int selectExpander(Walker *pWalker, Select *p){
             pUsing = 0;
           }
 
-          nAdd = pTab->nCol + (VisibleRowid(pTab) && (selFlags&SF_NestedFrom));
+          nAdd = pTab->nCol;
+          if( VisibleRowid(pTab) && (selFlags & SF_NestedFrom)!=0 ) nAdd++;
           for(j=0; j<nAdd; j++){
             const char *zName; 
             struct ExprList_item *pX; /* Newly added ExprList term */
@@ -6256,7 +6260,8 @@ static int selectExpander(Walker *pWalker, Select *p){
             pX = &pNew->a[pNew->nExpr-1];
             assert( pX->zEName==0 );
             if( (selFlags & SF_NestedFrom)!=0 && !IN_RENAME_OBJECT ){
-              if( pNestedFrom ){
+              if( pNestedFrom && (!ViewCanHaveRowid || j<pNestedFrom->nExpr) ){
+                assert( j<pNestedFrom->nExpr );
                 pX->zEName = sqlite3DbStrDup(db, pNestedFrom->a[j].zEName);
                 testcase( pX->zEName==0 );
               }else{
@@ -7636,7 +7641,7 @@ int sqlite3Select(
     /* Generate code for all sub-queries in the FROM clause
     */
     pSub = pItem->pSelect;
-    if( pSub==0 ) continue;
+    if( pSub==0 || pItem->addrFillSub!=0 ) continue;
 
     /* The code for a subquery should only be generated once. */
     assert( pItem->addrFillSub==0 );

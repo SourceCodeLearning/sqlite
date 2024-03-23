@@ -2535,6 +2535,15 @@ struct Table {
 #define HasRowid(X)     (((X)->tabFlags & TF_WithoutRowid)==0)
 #define VisibleRowid(X) (((X)->tabFlags & TF_NoVisibleRowid)==0)
 
+/* Macro is true if the SQLITE_ALLOW_ROWID_IN_VIEW (mis-)feature is
+** available.  By default, this macro is false
+*/
+#ifndef SQLITE_ALLOW_ROWID_IN_VIEW
+# define ViewCanHaveRowid     0
+#else
+# define ViewCanHaveRowid     (sqlite3Config.mNoVisibleRowid==0)
+#endif
+
 /*
 ** Each foreign key constraint is an instance of the following structure.
 **
@@ -3270,10 +3279,12 @@ struct IdList {
 **
 ** Union member validity:
 **
-**    u1.zIndexedBy          fg.isIndexedBy && !fg.isTabFunc
-**    u1.pFuncArg            fg.isTabFunc   && !fg.isIndexedBy
-**    u2.pIBIndex            fg.isIndexedBy && !fg.isCte
-**    u2.pCteUse             fg.isCte       && !fg.isIndexedBy
+**    u1.zIndexedBy      fg.isIndexedBy && !fg.isTabFunc
+**    u1.pFuncArg        fg.isTabFunc   && !fg.isIndexedBy
+**    u1.nRow            !fg.isTabFunc  && !fg.isIndexedBy
+**
+**    u2.pIBIndex        fg.isIndexedBy && !fg.isCte
+**    u2.pCteUse         fg.isCte       && !fg.isIndexedBy
 */
 struct SrcItem {
   Schema *pSchema;  /* Schema to which this item is fixed */
@@ -3311,6 +3322,7 @@ struct SrcItem {
   union {
     char *zIndexedBy;    /* Identifier from "INDEXED BY <zIndex>" clause */
     ExprList *pFuncArg;  /* Arguments to table-valued-function */
+    u32 nRow;            /* Number of rows in a VALUES clause */
   } u1;
   union {
     Index *pIBIndex;  /* Index structure corresponding to u1.zIndexedBy */
@@ -3812,6 +3824,7 @@ struct Parse {
   u8 disableLookaside; /* Number of times lookaside has been disabled */
   u8 prepFlags;        /* SQLITE_PREPARE_* flags */
   u8 withinRJSubrtn;   /* Nesting level for RIGHT JOIN body subroutines */
+  u8 bHasWith;         /* True if statement contains WITH */
 #if defined(SQLITE_DEBUG) || defined(SQLITE_COVERAGE_TEST)
   u8 earlyCleanup;     /* OOM inside sqlite3ParserAddCleanup() */
 #endif
@@ -4250,6 +4263,11 @@ struct Sqlite3Config {
 #ifndef SQLITE_UNTESTABLE
   int (*xTestCallback)(int);        /* Invoked by sqlite3FaultSim() */
 #endif
+#ifdef SQLITE_ALLOW_ROWID_IN_VIEW
+  u32 mNoVisibleRowid;              /* TF_NoVisibleRowid if the ROWID_IN_VIEW
+                                    ** feature is disabled.  0 if rowids can
+                                    ** occur in views. */
+#endif
   int bLocaltimeFault;              /* True to fail localtime() calls */
   int (*xAltLocaltime)(const void*,void*); /* Alternative localtime() routine */
   int iOnceResetThreshold;          /* When to reset OP_Once counters */
@@ -4486,6 +4504,9 @@ struct Window {
                           ** due to the SQLITE_SUBTYPE flag */
 };
 
+Select *sqlite3MultiValues(Parse *pParse, Select *pLeft, ExprList *pRow);
+void sqlite3MultiValuesEnd(Parse *pParse, Select *pVal);
+
 #ifndef SQLITE_OMIT_WINDOWFUNC
 void sqlite3WindowDelete(sqlite3*, Window*);
 void sqlite3WindowUnlinkFromSelect(Window*);
@@ -4705,10 +4726,13 @@ void sqlite3MutexWarnOnContention(sqlite3_mutex*);
 # define EXP754 (((u64)0x7ff)<<52)
 # define MAN754 ((((u64)1)<<52)-1)
 # define IsNaN(X) (((X)&EXP754)==EXP754 && ((X)&MAN754)!=0)
+# define IsOvfl(X) (((X)&EXP754)==EXP754)
   int sqlite3IsNaN(double);
+  int sqlite3IsOverflow(double);
 #else
-# define IsNaN(X)         0
-# define sqlite3IsNaN(X)  0
+# define IsNaN(X)             0
+# define sqlite3IsNaN(X)      0
+# define sqlite3IsOVerflow(X) 0
 #endif
 
 /*
@@ -5054,8 +5078,7 @@ void sqlite3LeaveMutexAndCloseZombie(sqlite3*);
 u32 sqlite3IsTrueOrFalse(const char*);
 int sqlite3ExprIdToTrueFalse(Expr*);
 int sqlite3ExprTruthValue(const Expr*);
-int sqlite3ExprIsConstant(Expr*);
-int sqlite3ExprIsConstantNotJoin(Expr*);
+int sqlite3ExprIsConstant(Parse*,Expr*);
 int sqlite3ExprIsConstantOrFunction(Expr*, u8);
 int sqlite3ExprIsConstantOrGroupBy(Parse*, Expr*, ExprList*);
 int sqlite3ExprIsTableConstant(Expr*,int);
