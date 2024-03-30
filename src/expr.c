@@ -2474,9 +2474,11 @@ static int exprNodeIsConstant(Walker *pWalker, Expr *pExpr){
     case TK_IF_NULL_ROW:
     case TK_REGISTER:
     case TK_DOT:
+    case TK_RAISE:
       testcase( pExpr->op==TK_REGISTER );
       testcase( pExpr->op==TK_IF_NULL_ROW );
       testcase( pExpr->op==TK_DOT );
+      testcase( pExpr->op==TK_RAISE );
       pWalker->eCode = 0;
       return WRC_Abort;
     case TK_VARIABLE:
@@ -2801,9 +2803,12 @@ int sqlite3ExprCanBeNull(const Expr *p){
       return 0;
     case TK_COLUMN:
       assert( ExprUseYTab(p) );
-      return ExprHasProperty(p, EP_CanBeNull) ||
-             NEVER(p->y.pTab==0) ||  /* Reference to column of index on expr */
-             (p->iColumn>=0
+      return ExprHasProperty(p, EP_CanBeNull)
+          || NEVER(p->y.pTab==0) /* Reference to column of index on expr */
+#ifdef SQLITE_ALLOW_ROWID_IN_VIEW
+          || (p->iColumn==XN_ROWID && IsView(p->y.pTab))
+#endif
+          || (p->iColumn>=0
               && p->y.pTab->aCol!=0 /* Possible due to prior error */
               && ALWAYS(p->iColumn<p->y.pTab->nCol)
               && p->y.pTab->aCol[p->iColumn].notNull==0);
