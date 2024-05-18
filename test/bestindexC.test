@@ -173,6 +173,41 @@ do_execsql_test 3.6 {
 } {4 5 6 7 8}
 unset ::do_not_use_offset
 
+#-------------------------------------------------------------------------
+reset_db
+proc vtab_command {lVal method args} {
+  switch -- $method {
+    xConnect { error "not happy!" }
+  }
 
+  return {}
+}
+
+register_tcl_module db
+do_catchsql_test 4.0 {
+  CREATE VIRTUAL TABLE y1 USING tcl(vtab_command 1);
+} {1 {not happy!}}
+do_test 4.1 {
+  sqlite3_errcode db
+} SQLITE_ERROR
+
+proc vtab_command {lVal method args} {
+  switch -- $method {
+    xConnect {
+      return $lVal
+    }
+  }
+  return {}
+}
+
+do_catchsql_test 4.2 {
+  CREATE VIRTUAL TABLE y1 USING tcl(vtab_command "PRAGMA page_size=1024");
+} {1 {declare_vtab: syntax error}}
+do_catchsql_test 4.3 {
+  CREATE VIRTUAL TABLE y1 USING tcl(vtab_command "CREATE TABLE x1(");
+} {1 {declare_vtab: incomplete input}}
+do_catchsql_test 4.4 {
+  CREATE VIRTUAL TABLE y1 USING tcl(vtab_command "CREATE TABLE x1(insert)");
+} {1 {declare_vtab: near "insert": syntax error}}
 
 finish_test
