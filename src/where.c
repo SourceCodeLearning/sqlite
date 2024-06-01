@@ -840,6 +840,40 @@ static int constraintCompatibleWithOuterJoin(
   return 1;
 }
 
+#ifndef SQLITE_OMIT_AUTOMATIC_INDEX
+/*
+** Return true if column iCol of table pTab seem like it might be a
+** good column to use as part of a query-time index.
+**
+** Current algorithm (subject to improvement!):
+**
+**   1.   If iCol is already the left-most column of some other index,
+**        then return false.
+**
+**   2.   If iCol is part of an existing index that has an aiRowLogEst of
+**        more than 20, then return false.
+**
+**   3.   If no disqualifying conditions above are found, return true.
+*/
+static SQLITE_NOINLINE int columnIsGoodIndexCandidate(
+  const Table *pTab,
+  int iCol
+){
+  const Index *pIdx;
+  for(pIdx = pTab->pIndex; pIdx!=0; pIdx=pIdx->pNext){
+    int j;
+    for(j=0; j<pIdx->nKeyCol; j++){
+       if( pIdx->aiColumn[j]==iCol ){
+         if( j==0 ) return 0;
+         if( pIdx->hasStat1 && pIdx->aiRowLogEst[j+1]>20 ) return 0;
+         break;
+       }
+    }
+  }
+  return 1;
+}
+#endif /* SQLITE_OMIT_AUTOMATIC_INDEX */
+
 
 
 #ifndef SQLITE_OMIT_AUTOMATIC_INDEX
@@ -854,6 +888,8 @@ static int termCanDriveIndex(
   const Bitmask notReady         /* Tables in outer loops of the join */
 ){
   char aff;
+  int leftCol;
+  
   if( pTerm->leftCursor!=pSrc->iCursor ) return 0;
   if( (pTerm->eOperator & (WO_EQ|WO_IS))==0 ) return 0;
   assert( (pSrc->fg.jointype & JT_RIGHT)==0 );
@@ -864,11 +900,12 @@ static int termCanDriveIndex(
   }
   if( (pTerm->prereqRight & notReady)!=0 ) return 0;
   assert( (pTerm->eOperator & (WO_OR|WO_AND))==0 );
-  if( pTerm->u.x.leftColumn<0 ) return 0;
-  aff = pSrc->pTab->aCol[pTerm->u.x.leftColumn].affinity;
+  leftCol = pTerm->u.x.leftColumn;
+  if( leftCol<0 ) return 0;
+  aff = pSrc->pTab->aCol[leftCol].affinity;
   if( !sqlite3IndexAffinityOk(pTerm->pExpr, aff) ) return 0;
   testcase( pTerm->pExpr->op==TK_IS );
-  return 1;
+  return columnIsGoodIndexCandidate(pSrc->pTab, leftCol);
 }
 #endif
 
@@ -5208,6 +5245,83 @@ static LogEst whereSortingCost(
 }
 
 /*
+** Compute the maximum number of paths in the solver algorithm, for
+** queries that have three or more terms in the FROM clause.  Queries with
+** two or fewer FROM clause terms are handled by the caller.
+**
+** Query planning is NP-hard.  We must limit the number of paths at
+** each step of the solver search algorithm to avoid exponential behavior.
+**
+** The value returned is a tuning parameter.  Currently the value is:
+**
+**     18    for star queries
+**     12    otherwise
+**
+** For the purposes of SQLite, a star-query is defined as a query
+** with a large central table that is joined against four or more
+** smaller tables.  The central table is called the "fact" table.
+** The smaller tables that get joined are "dimension tables".
+**
+** SIDE EFFECT:  (and really the whole point of this subroutine)
+**
+** If pWInfo describes a star-query, then the cost on WhereLoops for the
+** fact table is reduced.  This heuristic helps keep fact tables in
+** outer loops.  Without this heuristic, paths with fact tables in outer
+** loops tend to get pruned by the mxChoice limit on the number of paths,
+** resulting in poor query plans.  The total amount of heuristic cost
+** adjustment is stored in pWInfo->nOutStarDelta and the cost adjustment
+** for each WhereLoop is stored in its rStarDelta field.
+*/
+static int computeMxChoice(WhereInfo *pWInfo, LogEst nRowEst){
+  int nLoop = pWInfo->nLevel;    /* Number of terms in the join */
+  if( nRowEst==0 && nLoop>=5 ){
+    /* Check to see if we are dealing with a star schema and if so, reduce
+    ** the cost of fact tables relative to dimension tables, as a heuristic
+    ** to help keep the fact tables in outer loops.
+    */
+    int iLoop;                /* Counter over join terms */
+    Bitmask m;                /* Bitmask for current loop */
+    assert( pWInfo->nOutStarDelta==0 );
+    for(iLoop=0, m=1; iLoop<nLoop; iLoop++, m<<=1){
+      WhereLoop *pWLoop;        /* For looping over WhereLoops */
+      int nDep = 0;             /* Number of dimension tables */
+      LogEst rDelta;            /* Heuristic cost adjustment */
+      Bitmask mSeen = 0;        /* Mask of dimension tables */
+      for(pWLoop=pWInfo->pLoops; pWLoop; pWLoop=pWLoop->pNextLoop){
+        if( (pWLoop->prereq & m)!=0 && (pWLoop->maskSelf & mSeen)==0 ){
+          nDep++;
+          mSeen |= pWLoop->maskSelf;
+        }
+      }
+      if( nDep<=3 ) continue;
+      rDelta = 15*(nDep-3);
+#ifdef WHERETRACE_ENABLED /* 0x4 */
+      if( sqlite3WhereTrace&0x4 ){
+         SrcItem *pItem = pWInfo->pTabList->a + iLoop;
+         sqlite3DebugPrintf("Fact-table %s: %d dimensions, cost reduced %d\n",
+             pItem->zAlias ? pItem->zAlias : pItem->pTab->zName,
+             nDep, rDelta);
+      }
+#endif
+      if( pWInfo->nOutStarDelta==0 ){
+        for(pWLoop=pWInfo->pLoops; pWLoop; pWLoop=pWLoop->pNextLoop){
+          pWLoop->rStarDelta = 0;
+        }
+      }
+      pWInfo->nOutStarDelta += rDelta;
+      for(pWLoop=pWInfo->pLoops; pWLoop; pWLoop=pWLoop->pNextLoop){
+        if( pWLoop->maskSelf==m ){
+          pWLoop->rRun -= rDelta;
+          pWLoop->nOut -= rDelta;
+          pWLoop->rStarDelta = rDelta;
+        }
+      }
+    }      
+  }
+  return pWInfo->nOutStarDelta>0 ? 18 : 12;
+}
+
+/*
 ** Given the list of WhereLoop objects at pWInfo->pLoops, this routine
 ** attempts to find the lowest cost path that visits each WhereLoop
 ** once.  This path is then loaded into the pWInfo->a[].pWLoop fields.
@@ -5242,13 +5356,25 @@ static int wherePathSolver(WhereInfo *pWInfo, LogEst nRowEst){
 
   pParse = pWInfo->pParse;
   nLoop = pWInfo->nLevel;
-  /* TUNING: For simple queries, only the best path is tracked.
-  ** For 2-way joins, the 5 best paths are followed.
-  ** For joins of 3 or more tables, track the 10 best paths */
-  mxChoice = (nLoop<=1) ? 1 : (nLoop==2 ? 5 : 10);
-  assert( nLoop<=pWInfo->pTabList->nSrc );
   WHERETRACE(0x002, ("---- begin solver.  (nRowEst=%d, nQueryLoop=%d)\n",
                      nRowEst, pParse->nQueryLoop));
+  /* TUNING: mxChoice is the maximum number of possible paths to preserve
+  ** at each step.  Based on the number of loops in the FROM clause:
+  **
+  **     nLoop      mxChoice
+  **     -----      --------
+  **       1            1            // the most common case
+  **       2            5
+  **       3+        12 or 18        // see computeMxChoice()
+  */
+  if( nLoop<=1 ){
+    mxChoice = 1;
+  }else if( nLoop==2 ){
+    mxChoice = 5;
+  }else{
+    mxChoice = computeMxChoice(pWInfo, nRowEst);
+  }
+  assert( nLoop<=pWInfo->pTabList->nSrc );
 
   /* If nRowEst is zero and there is an ORDER BY clause, ignore it. In this
   ** case the purpose of this call is to estimate the number of rows returned
@@ -5331,7 +5457,10 @@ static int wherePathSolver(WhereInfo *pWInfo, LogEst nRowEst){
 
         /* At this point, pWLoop is a candidate to be the next loop.
         ** Compute its cost */
-        rUnsorted = sqlite3LogEstAdd(pWLoop->rSetup,pWLoop->rRun + pFrom->nRow);
+        rUnsorted = pWLoop->rRun + pFrom->nRow;
+        if( pWLoop->rSetup ){
+          rUnsorted = sqlite3LogEstAdd(pWLoop->rSetup, rUnsorted);
+        }
         rUnsorted = sqlite3LogEstAdd(rUnsorted, pFrom->rUnsorted);
         nOut = pFrom->nRow + pWLoop->nOut;
         maskNew = pFrom->maskLoop | pWLoop->maskSelf;
@@ -5376,6 +5505,7 @@ static int wherePathSolver(WhereInfo *pWInfo, LogEst nRowEst){
         ** to (pTo->isOrdered==(-1))==(isOrdered==(-1))" for the range
         ** of legal values for isOrdered, -1..64.
         */
+        testcase( nTo==0 );
         for(jj=0, pTo=aTo; jj<nTo; jj++, pTo++){
           if( pTo->maskLoop==maskNew
            && ((pTo->isOrdered^isOrdered)&0x80)==0
@@ -5492,16 +5622,28 @@ static int wherePathSolver(WhereInfo *pWInfo, LogEst nRowEst){
 
 #ifdef WHERETRACE_ENABLED  /* >=2 */
     if( sqlite3WhereTrace & 0x02 ){
+      LogEst rMin, rFloor = 0;
+      int nDone = 0;
       sqlite3DebugPrintf("---- after round %d ----\n", iLoop);
-      for(ii=0, pTo=aTo; ii<nTo; ii++, pTo++){
-        sqlite3DebugPrintf(" %s cost=%-3d nrow=%-3d order=%c",
-           wherePathName(pTo, iLoop+1, 0), pTo->rCost, pTo->nRow,
-           pTo->isOrdered>=0 ? (pTo->isOrdered+'0') : '?');
-        if( pTo->isOrdered>0 ){
-          sqlite3DebugPrintf(" rev=0x%llx\n", pTo->revLoop);
-        }else{
-          sqlite3DebugPrintf("\n");
+      while( nDone<nTo ){
+        rMin = 0x7fff;
+        for(ii=0, pTo=aTo; ii<nTo; ii++, pTo++){
+          if( pTo->rCost>rFloor && pTo->rCost<rMin ) rMin = pTo->rCost;
         }
+        for(ii=0, pTo=aTo; ii<nTo; ii++, pTo++){
+          if( pTo->rCost==rMin ){
+            sqlite3DebugPrintf(" %s cost=%-3d nrow=%-3d order=%c",
+               wherePathName(pTo, iLoop+1, 0), pTo->rCost, pTo->nRow,
+               pTo->isOrdered>=0 ? (pTo->isOrdered+'0') : '?');
+            if( pTo->isOrdered>0 ){
+              sqlite3DebugPrintf(" rev=0x%llx\n", pTo->revLoop);
+            }else{
+              sqlite3DebugPrintf("\n");
+            }
+            nDone++;
+          }
+        }
+        rFloor = rMin;
       }
     }
 #endif
@@ -5596,7 +5738,7 @@ static int wherePathSolver(WhereInfo *pWInfo, LogEst nRowEst){
     }
   }
 
-  pWInfo->nRowOut = pFrom->nRow;
+  pWInfo->nRowOut = pFrom->nRow + pWInfo->nOutStarDelta;
 
   /* Free temporary memory and return success */
   sqlite3StackFreeNN(pParse->db, pSpace);
@@ -5986,6 +6128,7 @@ static SQLITE_NOINLINE void whereCheckIfBloomFilterIsUseful(
       }
     }
     nSearch += pLoop->nOut;
+    if( pWInfo->nOutStarDelta ) nSearch += pLoop->rStarDelta;
   }
 }
 
@@ -6501,7 +6644,7 @@ WhereInfo *sqlite3WhereBegin(
     if( db->mallocFailed ) goto whereBeginError;
     if( pWInfo->pOrderBy ){
        whereInterstageHeuristic(pWInfo);
-       wherePathSolver(pWInfo, pWInfo->nRowOut+1);
+       wherePathSolver(pWInfo, pWInfo->nRowOut<0 ? 1 : pWInfo->nRowOut+1);
        if( db->mallocFailed ) goto whereBeginError;
     }
 
