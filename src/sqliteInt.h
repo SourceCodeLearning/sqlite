@@ -3460,7 +3460,7 @@ struct NameContext {
 #define NC_UUpsert   0x000200 /* True if uNC.pUpsert is used */
 #define NC_UBaseReg  0x000400 /* True if uNC.iBaseReg is used */
 #define NC_MinMaxAgg 0x001000 /* min/max aggregates seen.  See note above */
-#define NC_Complex   0x002000 /* True if a function or subquery seen */
+/*                   0x002000 // available for reuse */
 #define NC_AllowWin  0x004000 /* Window functions are allowed here */
 #define NC_HasWin    0x008000 /* One or more window functions seen */
 #define NC_IsDDL     0x010000 /* Resolving names in a CREATE statement */
@@ -5088,7 +5088,7 @@ int sqlite3ExprIsSingleTableConstraint(Expr*,const SrcList*,int,int);
 #ifdef SQLITE_ENABLE_CURSOR_HINTS
 int sqlite3ExprContainsSubquery(Expr*);
 #endif
-int sqlite3ExprIsInteger(const Expr*, int*);
+int sqlite3ExprIsInteger(const Expr*, int*, Parse*);
 int sqlite3ExprCanBeNull(const Expr*);
 int sqlite3ExprNeedsNoAffinityChange(const Expr*, char);
 int sqlite3IsRowid(const char*);
