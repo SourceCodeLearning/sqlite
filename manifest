@@ -1,5 +1,5 @@
-C Do\snot\somit\sthe\sORDER\sBY\sclause\sfrom\sa\srecursive\sCTE\sjust\sbecause\sthe\s\nquery\sthat\scontains\sthe\sCTE\salso\scontains\san\sORDER\sBY\sclause.\s\sPlus\nother\schanges\simported\sfrom\sthe\srecursive-cte-orderby-fix\sbranch.
-D 2024-06-14T23:13:54.369
+C Revert\sLemon\sso\sthat\sit\sonly\sshows\s-D\soptions\sthat\sare\sactually\sused.\s\sThough\nthe\schange\sto\sdisplay\sthe\soptions\sin\ssorted\sorder\sis\sretained.
+D 2024-06-19T18:54:04.609
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -39,7 +39,7 @@ F configure 27d144c2edfa993ac155a2ad5e6b431e4ec811159598ef55a59f345bc2e5e533 x
 F configure.ac f25bd7843120f2c2b8bc9db5a92b0502bbdd28e68907415c3d42fc8e57c657b9
 F contrib/sqlitecon.tcl 210a913ad63f9f991070821e599d600bd913e0ad
 F doc/F2FS.txt c1d4a0ae9711cfe0e1d8b019d154f1c29e0d3abfe820787ba1e9ed7691160fcd
-F doc/compile-for-windows.md 50b27d77be96195c66031a3181cb8684ed822327ea834e07f9c014213e5e3bcf
+F doc/compile-for-windows.md e8635eea9153dcd6a51fd2740666ebc4492b3813cb1ac31cd8e99150df91762d
 F doc/json-enhancements.md e356fc834781f1f1aa22ee300027a270b2c960122468499bf347bb123ce1ea4f
 F doc/jsonb.md 5fab4b8613aa9153fbeb6259297bd4697988af8b3d23900deba588fa7841456b
 F doc/lemon.html 8b266ff711d2ec7f867c3dca37634963f48a630329908cc282beebfa8c708706
@@ -592,7 +592,7 @@ F ext/userauth/sqlite3userauth.h 7f3ea8c4686db8e40b0a0e7a8e0b00fac13aa7a3
 F ext/userauth/user-auth.txt ca7e9ee82ca4e1c1744295f8184dd70edfae1992865d26c64303f539eb6c084c
 F ext/userauth/userauth.c 7f00cded7dcaa5d47f54539b290a43d2e59f4b1eb5f447545fa865f002fc80cb
 F ext/wasm/EXPORTED_FUNCTIONS.fiddle.in 27450c8b8c70875a260aca55435ec927068b34cef801a96205adb81bdcefc65c
-F ext/wasm/GNUmakefile 21f015f342e4ed9b7ff632c10750512259d26c836a34f4f535673fae9a7c9fcc
+F ext/wasm/GNUmakefile 05727be716879b1345892ce8c61dd093aefe26ccc48ad9467f3864b85475993b
 F ext/wasm/README-dist.txt 6382cb9548076fca472fb3330bbdba3a55c1ea0b180ff9253f084f07ff383576
 F ext/wasm/README.md a8a2962c3aebdf8d2104a9102e336c5554e78fc6072746e5daf9c61514e7d193
 F ext/wasm/SQLTester/GNUmakefile e0794f676d55819951bbfae45cc5e8d7818dc460492dc317ce7f0d2eca15caff
@@ -618,7 +618,7 @@ F ext/wasm/api/sqlite3-license-version-header.js 0c807a421f0187e778dc1078f10d299
 F ext/wasm/api/sqlite3-opfs-async-proxy.js 881af4643f037b6590c491cef5fac8bcdd4118993197a1fa222ccb8b01e3504a
 F ext/wasm/api/sqlite3-vfs-helper.c-pp.js 3f828cc66758acb40e9c5b4dcfd87fd478a14c8fb7f0630264e6c7fa0e57515d
 F ext/wasm/api/sqlite3-vfs-opfs-sahpool.c-pp.js 8433ee332d5f5e39fb19427fccb7bad7f44aa99b5504daad3343fc128c311e78
-F ext/wasm/api/sqlite3-vfs-opfs.c-pp.js 9e7600f0e97dc4f5ec33089b60c6b931df73e347653bf273cf6864f9f9501d7d
+F ext/wasm/api/sqlite3-vfs-opfs.c-pp.js 0c3801a8e252944fdbaddbad698534316fde90d3db5eedae156e7774ab127710
 F ext/wasm/api/sqlite3-vtab-helper.c-pp.js a2fcbc3fecdd0eea229283584ebc122f29d98194083675dbe5cb2cf3a17fe309
 F ext/wasm/api/sqlite3-wasm.c 9267174b9b0591b4f71193542ab57adf95bb9415f7d3453acf4a8ca8052f5e6c
 F ext/wasm/api/sqlite3-worker1-promiser.c-pp.js 46f303ba8ddd1b2f0a391798837beddfa72e8c897038c8047eda49ce7d5ed46b
@@ -643,11 +643,10 @@ F ext/wasm/demo-worker1.html 2c178c1890a2beb5a5fecb1453e796d067a4b8d3d2a04d65ca2
 F ext/wasm/demo-worker1.js 836bece8615b17b1b572584f7b15912236a5947fe8c68b98d2737d7e287447ef
 F ext/wasm/dist.make 653e212c1e84aa3be168d62a10616ccea45ee9585b0192745d2706707a5248ce
 F ext/wasm/example_extra_init.c 2347cd69d19d839ef4e5e77b7855103a7fe3ef2af86f2e8c95839afd8b05862f
-F ext/wasm/fiddle.make 3c2eace29255d6ddd219f5d8cc2728cb28b9fe717ea80b6062c2a6178947a16b
-F ext/wasm/fiddle/emscripten.css 3d253a6fdb8983a2ac983855bfbdd4b6fa1ff267c28d69513dd6ef1f289ada3f
+F ext/wasm/fiddle.make 828c6f3e45ba2541e61fd79c3d8b07a5be4cf13f9acb6430b562bcab3f251496
 F ext/wasm/fiddle/fiddle-worker.js 850e66fce39b89d59e161d1abac43a181a4caa89ddeea162765d660277cd84ce
 F ext/wasm/fiddle/fiddle.js b444a5646a9aac9f3fc06c53d78af5e1912eb235d69a8e6010723e4eb0e9d4a1
-F ext/wasm/fiddle/index.html 5daf54e8f3d7777cbb1ca4f93affe28858dbfff25841cb4ab81d694efed28ec2
+F ext/wasm/fiddle/index.html 739e0b75bc592679665d25e2f7649d2b8b2db678f3b41a772a8720b609b8482d
 F ext/wasm/index-dist.html 564b5ec5669676482c5a25dea9e721d8eafed426ecb155f93d29aeff8507511f
 F ext/wasm/index.html 4337f495416756802669f69f9f9f3df9f87ee4c1918e6718719b4b5718e4713a
 F ext/wasm/jaccwabyt/jaccwabyt.js 1264710db3cfbcb6887d95665b7aeba60c1126eaef789ca4cf1a4a17d5bc7f54
@@ -760,7 +759,7 @@ F src/shell.c.in ad27d1d990e9e5fb7ae8fc38a717e91f55233714f59723e5618baf4a2a3d2b6
 F src/sqlite.h.in 6c884a87bbf8828562b49272025a1e66e3801a196a58b0bdec87edcd2c9c8fc1
 F src/sqlite3.rc 5121c9e10c3964d5755191c80dd1180c122fc3a8
 F src/sqlite3ext.h 3f046c04ea3595d6bfda99b781926b17e672fd6d27da2ba6d8d8fc39981dcb54
-F src/sqliteInt.h af50738edf6a6cf9aa974b98d75bd0cedce607948dd10885ac6ae6cf5abae23c
+F src/sqliteInt.h 76f4bf5adce98a989bf9b792b962bc8f739e79636a63d841e567017370acd607
 F src/sqliteLimit.h 6878ab64bdeb8c24a1d762d45635e34b96da21132179023338c93f820eee6728
 F src/status.c cb11f8589a6912af2da3bb1ec509a94dd8ef27df4d4c1a97e0bcf2309ece972b
 F src/table.c 0f141b58a16de7e2fbe81c308379e7279f4c6b50eb08efeec5892794a0ba30d1
@@ -2106,7 +2105,7 @@ F tool/genfkey.test b6afd7b825d797a1e1274f519ab5695373552ecad5cd373530c63533638a
 F tool/getlock.c f4c39b651370156cae979501a7b156bdba50e7ce
 F tool/index_usage.c f62a0c701b2c7ff2f3e21d206f093c123f222dbf07136a10ffd1ca15a5c706c5
 F tool/kvtest-speed.sh 4761a9c4b3530907562314d7757995787f7aef8f
-F tool/lemon.c 2eaee61479f9b97056950741c8f671a13281c819b94246698264a322360319a9
+F tool/lemon.c d048516b2c3ad4119b1c1154a73f4f9435b275fea076318959f817effe23b827
 F tool/lempar.c e6b649778e5c027c8365ff01d7ef39297cd7285fa1f881cce31792689541e79f
 F tool/libvers.c caafc3b689638a1d88d44bc5f526c2278760d9b9
 F tool/loadfts.c c3c64e4d5e90e8ba41159232c2189dba4be7b862
@@ -2147,7 +2146,7 @@ F tool/showshm.c a0ab6ec32dd1f11218ca2a4018f8fb875b59414801ab8ceed8b2e69b7b45a80
 F tool/showstat4.c 0682ebea7abf4d3657f53c4a243f2e7eab48eab344ed36a94bb75dcd19a5c2a1
 F tool/showwal.c 11eca547980a066b081f512636151233350ac679f29ecf4ebfce7f4530230b3d
 F tool/soak1.tcl 8d407956e1a45b485a8e072470a3e629a27037fe
-F tool/spaceanal.tcl 70c87c04cfd2e77b3e6f21c33ca768296aa8f67d4ab4874786ac8fbb28433477
+F tool/spaceanal.tcl 3568b2b15b83dcaf789e787a4db0980da81eb6fa0e1e00783e4a927fdf584550
 F tool/speed-check.sh e8d20cc2eb9c85ec1ba562226de144435456dcdff4ee618de49603c6958f6116
 F tool/speedtest.tcl 06c76698485ccf597b9e7dbb1ac70706eb873355
 F tool/speedtest16.c ecb6542862151c3e6509bbc00509b234562ae81e
@@ -2195,11 +2194,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 5bd9fd5f61e7cd1ed3b44c5cabc759c154c98eb40ad10d29e61f142aaa062ddf
-Q +5e700f2cc22bafa51928084454b374858eee3e2b00b58454cb97948d1691d276
-Q +ca063802332eba9cb97d5e52c5889403bba7b57e421695929a49c1d381bdcb44
-Q +e87966cf63af78a8cc0188d9476a2003a0be1ca1be2b305af97add0428ace2c7
-R e25beacc80993e6730d8a9b60a6a3784
+P 2aa009c38bb207ac59b9bbd6f8e0d7315697b3fd6a01f9431f29a3c7ccad53e7
+R 3281f4b2c4a24316e0e2a5cf40f57c6f
 U drh
-Z 4bd7377f01b30167b6d338c1a711954b
+Z 4a8e9f1737e4d24d9c6b904079fd66cf
 # Remove this line to create a well-formed Fossil manifest.
