@@ -1,5 +1,5 @@
-C Use\sa\smini\sBloom\sfilter\sto\shelp\sreduce\sthe\snumber\sof\spointless\ssearches\sfor\nprior\sSubrtnSig\sobjects\swhen\sgenerating\scode\sfor\sIN\soperators\swith\ssubqueries\nas\stheir\sright\soperand.
-D 2024-07-05T13:55:59.179
+C sqldiff:\sfail\sif\sthe\s2nd\sdb\sargument\scannot\sbe\sopened\sread-only.
+D 2024-07-12T14:41:16.904
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -100,7 +100,7 @@ F ext/fts5/fts5_config.c 68cb87a49215f8e7028000b681df4057c430a4a6afbd676463886da
 F ext/fts5/fts5_expr.c c7336d5f9ecc0e2b014d700be2bec0ea383b0e82c494a7c5c4ac622327c2bfad
 F ext/fts5/fts5_hash.c adda4272be401566a6e0ba1acbe70ee5cb97fce944bc2e04dc707152a0ec91b1
 F ext/fts5/fts5_index.c ee0f4d50bc0c58a7c5ef7d645e7e38e1e59315b8ea9d722ae00c5f949ee65379
-F ext/fts5/fts5_main.c 1d8bd88240f4ece62645c93df2a09162607e3b3d33838107bb711e8ad1f7cf14
+F ext/fts5/fts5_main.c 77fefb37e7931095a5ff271a28fbe4f73ec46d5492ef1f35d405d98e137ad8ed
 F ext/fts5/fts5_storage.c f9e31b0d155e9b2c92d5d3a09ad7a56b937fbf1c7f962e10f4ca6281349f3934
 F ext/fts5/fts5_tcl.c fdf7e2bb9a9186cfcaf2d2ce11d338309342b7a7593c2812bc54455db53da5d2
 F ext/fts5/fts5_test_mi.c 08c11ec968148d4cb4119d96d819f8c1f329812c568bac3684f5464be177d3ee
@@ -139,15 +139,15 @@ F ext/fts5/test/fts5columnsize.test 0af91d63985afdf663455d4b572b935238380140d740
 F ext/fts5/test/fts5config.test 017daf10d2642496e97402baa0134de8b5b46b9c37e53c229cd9ab711d21522c
 F ext/fts5/test/fts5conflict.test bf6030a77dbb1bedfcc42e589ed7980846c995765d77460551e448b56d741244
 F ext/fts5/test/fts5connect.test 08030168fc96fc278fa81f28654fb7e90566f33aff269c073e19b3ae9126b2f4
-F ext/fts5/test/fts5content.test 84aa36c6c8b6cebc2b7be3a1e502e2b85c27c58b98614d7cc0fe9d3acf402601
+F ext/fts5/test/fts5content.test d5c0c2142e64cb305f0968de70c01f8e59dbc3ecc56520c22e739e5dd99ea3bb
 F ext/fts5/test/fts5contentless.test b107465f8cd27dde6313b9c60b61d7158a7753b9c663c5c553695f826bb3c0a5
 F ext/fts5/test/fts5contentless2.test 70ffe6c611d8f278240da56734df8a77948f04e2739b358439e9bdcf56ced35f
 F ext/fts5/test/fts5contentless3.test 75eaae5ad6b284ee447788943974d323228f27cc35a1681da997135cff95bc6a
 F ext/fts5/test/fts5contentless4.test ec34dc69ef474ca9997dae6d91e072906e0e9a5a4b05ea89964c863833b6eff8
 F ext/fts5/test/fts5contentless5.test ceb53fcd635f726458fdee2e4482a37966e6b328fe94521ed02d04048f02dac5
-F ext/fts5/test/fts5corrupt.test 6d2143d2a30b2bd2795223f0c941457ae194b8f09fa490e0205ec670a68dea64
+F ext/fts5/test/fts5corrupt.test a9bda1ded5112ebf1ee85c5381bd1fe8974952e2523cede4d5072804d2011503
 F ext/fts5/test/fts5corrupt2.test a524eaa861aebecb33db919f065c8d2212f4871217446db3e5e79c1c4b49c798
-F ext/fts5/test/fts5corrupt3.test 12df0beb4b3e270d40dff3237b73e2dd2e9577404e1eca3f0847015ebe4f03ae
+F ext/fts5/test/fts5corrupt3.test 3cbb18b8970c66ed4d741eb3eecf42c986bd4c430572a5050350a72030de66cf
 F ext/fts5/test/fts5corrupt4.test dc08d19f5b8943e95a7778a7d8da592042504faf18dd93f68f7d7a0d7d7dd733
 F ext/fts5/test/fts5corrupt5.test 11b47126f5772cc37b67e3e8b2ed05895c4d07c05338bc07e4eea225bfe32c76
 F ext/fts5/test/fts5corrupt6.test 2d72db743db7b5d9c9a6d0cfef24d799ed1aa5e8192b66c40e871a37ed9eed06
@@ -593,7 +593,7 @@ F ext/userauth/sqlite3userauth.h 7f3ea8c4686db8e40b0a0e7a8e0b00fac13aa7a3
 F ext/userauth/user-auth.txt ca7e9ee82ca4e1c1744295f8184dd70edfae1992865d26c64303f539eb6c084c
 F ext/userauth/userauth.c 7f00cded7dcaa5d47f54539b290a43d2e59f4b1eb5f447545fa865f002fc80cb
 F ext/wasm/EXPORTED_FUNCTIONS.fiddle.in 27450c8b8c70875a260aca55435ec927068b34cef801a96205adb81bdcefc65c
-F ext/wasm/GNUmakefile 05727be716879b1345892ce8c61dd093aefe26ccc48ad9467f3864b85475993b
+F ext/wasm/GNUmakefile 6128465c4790ee345ab50d8ec37277d9dc714e5b5814a49f47286ba7d6231a32
 F ext/wasm/README-dist.txt 6382cb9548076fca472fb3330bbdba3a55c1ea0b180ff9253f084f07ff383576
 F ext/wasm/README.md a8a2962c3aebdf8d2104a9102e336c5554e78fc6072746e5daf9c61514e7d193
 F ext/wasm/SQLTester/GNUmakefile e0794f676d55819951bbfae45cc5e8d7818dc460492dc317ce7f0d2eca15caff
@@ -611,15 +611,15 @@ F ext/wasm/api/post-js-footer.js cd0a8ec768501d9bd45d325ab0442037fb0e33d1f3b4f08
 F ext/wasm/api/post-js-header.js 04dc12c3edd666b64a1b4ef3b6690c88dcc653f26451fd4734472d8e29c1c122
 F ext/wasm/api/pre-js.c-pp.js ad906703f7429590f2fbf5e6498513bf727a1a4f0ebfa057afb08161d7511219
 F ext/wasm/api/sqlite3-api-cleanup.js d235ad237df6954145404305040991c72ef8b1881715d2a650dda7b3c2576d0e
-F ext/wasm/api/sqlite3-api-glue.js 114085f4dceb28e06d20d3fb597b2501a4aa69f4b6cd29234f7cc1cf81d5b92d
-F ext/wasm/api/sqlite3-api-oo1.js c373cc04625a96bd3f01ce8ebeac93a5d38dbda6215818c925570df5a945565e
+F ext/wasm/api/sqlite3-api-glue.c-pp.js 114085f4dceb28e06d20d3fb597b2501a4aa69f4b6cd29234f7cc1cf81d5b92d
+F ext/wasm/api/sqlite3-api-oo1.c-pp.js c373cc04625a96bd3f01ce8ebeac93a5d38dbda6215818c925570df5a945565e
 F ext/wasm/api/sqlite3-api-prologue.js b347a0c5350247f90174a0ad9b9e72a99a5f837f31f78f60fcdb829b2ca30b63
-F ext/wasm/api/sqlite3-api-worker1.js 5cc22a3c0d52828cb32aad8691488719f47d27567e63e8bc8b832d74371c352d
+F ext/wasm/api/sqlite3-api-worker1.c-pp.js 5cc22a3c0d52828cb32aad8691488719f47d27567e63e8bc8b832d74371c352d
 F ext/wasm/api/sqlite3-license-version-header.js 0c807a421f0187e778dc1078f10d2994b915123c1223fe752b60afdcd1263f89
-F ext/wasm/api/sqlite3-opfs-async-proxy.js 881af4643f037b6590c491cef5fac8bcdd4118993197a1fa222ccb8b01e3504a
+F ext/wasm/api/sqlite3-opfs-async-proxy.js e8f1df56e97a29004a95a2eddd26778f52c33b3e797d32d4b1b668a38e6493dd
 F ext/wasm/api/sqlite3-vfs-helper.c-pp.js 3f828cc66758acb40e9c5b4dcfd87fd478a14c8fb7f0630264e6c7fa0e57515d
 F ext/wasm/api/sqlite3-vfs-opfs-sahpool.c-pp.js 8433ee332d5f5e39fb19427fccb7bad7f44aa99b5504daad3343fc128c311e78
-F ext/wasm/api/sqlite3-vfs-opfs.c-pp.js 0c3801a8e252944fdbaddbad698534316fde90d3db5eedae156e7774ab127710
+F ext/wasm/api/sqlite3-vfs-opfs.c-pp.js 258a0d7c2a952ee360c13d7e4551b11d3f4fbe6dec1df6162866eca4d54e8443
 F ext/wasm/api/sqlite3-vtab-helper.c-pp.js a2fcbc3fecdd0eea229283584ebc122f29d98194083675dbe5cb2cf3a17fe309
 F ext/wasm/api/sqlite3-wasm.c 9267174b9b0591b4f71193542ab57adf95bb9415f7d3453acf4a8ca8052f5e6c
 F ext/wasm/api/sqlite3-worker1-promiser.c-pp.js 46f303ba8ddd1b2f0a391798837beddfa72e8c897038c8047eda49ce7d5ed46b
@@ -705,7 +705,7 @@ F src/date.c 13dd752847afb32ed70510ad7345a5b9c841f51ad904dba5d010f1fa3a6a324e
 F src/dbpage.c 80e46e1df623ec40486da7a5086cb723b0275a6e2a7b01d9f9b5da0f04ba2782
 F src/dbstat.c 3b677254d512fcafd4d0b341bf267b38b235ccfddbef24f9154e19360fa22e43
 F src/delete.c cb766727c78e715f9fb7ec8a7d03658ed2a3016343ca687acfcec9083cdca500
-F src/expr.c e8e5c5b2e2bf3d3d4b575c71e8fdd19caed20712afef6ad9fde735f9a210e08d
+F src/expr.c 1119a2cbb1ade3ee249c7eb18916174385219a7e4f0f5ad26d22fed6607903b0
 F src/fault.c 460f3e55994363812d9d60844b2a6de88826e007
 F src/fkey.c 852f93c0ef995e0c2b8983059a2b97151c194cc8259e21f5bc2b7ac508348c2a
 F src/func.c 1f61e32e7a357e615b5d2e774bee563761fce4f2fd97ecb0f72c33e62a2ada5f
@@ -2156,7 +2156,7 @@ F tool/speedtest8.c 2902c46588c40b55661e471d7a86e4dd71a18224
 F tool/speedtest8inst1.c 7ce07da76b5e745783e703a834417d725b7d45fd
 F tool/spellsift.tcl 52b4b04dc4333c7ab024f09d9d66ed6b6f7c6eb00b38497a09f338fa55d40618 x
 F tool/split-sqlite3c.tcl 5aa60643afca558bc732b1444ae81a522326f91e1dc5665b369c54f09e20de60
-F tool/sqldiff.c 1e0a2c264c2ad5aca745d35deee3c7715cb00c703839cfb0b85be079db55194c
+F tool/sqldiff.c 847fc8fcfddf5ce4797b7394cad6372f2f5dc17d8186e2ef8fb44d50fae4f44a
 F tool/sqlite3_analyzer.c.in 8da2b08f56eeac331a715036cf707cc20f879f231362be0c22efd682e2b89b4f
 F tool/sqltclsh.c.in 1bcc2e9da58fadf17b0bf6a50e68c1159e602ce057210b655d50bad5aaaef898
 F tool/sqltclsh.tcl 862f4cf1418df5e1315b5db3b5ebe88969e2a784525af5fbf9596592f14ed848
@@ -2195,8 +2195,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P c9a3498113074bbcd9a8c8d30286fef6c6a49ad2c84b90ec0f5a148389d6245c
-R 048647da7489fe3c22ba97fe98be7560
-U drh
-Z a8545f3061897f51fd0152659e811cae
+P af41a1e6fc8b36e9bf65a5bb0154e1ce7eb99903cb5a3e4779322527c29d8780
+R cd90730c86cb7f967c489fb04ff854ed
+U stephan
+Z 00ecf88c93499ce80acd271f6ea6acd0
 # Remove this line to create a well-formed Fossil manifest.
