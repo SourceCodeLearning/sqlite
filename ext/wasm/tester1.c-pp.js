@@ -461,7 +461,7 @@ globalThis.sqlite3InitModule = sqlite3InitModule;
       try{ sqlite3.SQLite3Error.toss("resultCode check") }
       catch(e){
         T.assert(capi.SQLITE_ERROR === e.resultCode)
-          .assert('resultCode check' === e.message);        
+          .assert('resultCode check' === e.message);
       }
     })
   ////////////////////////////////////////////////////////////////////
@@ -1475,7 +1475,8 @@ globalThis.sqlite3InitModule = sqlite3InitModule;
 
       let st = db.prepare("update t set b=:b where a='blob'");
       try {
-        T.assert(0===st.columnCount);
+        T.assert(0===st.columnCount)
+          .assert( false===st.isReadOnly() );
         const ndx = st.getParamIndex(':b');
         T.assert(1===ndx);
         st.bindAsBlob(ndx, "ima blob")
@@ -2061,6 +2062,15 @@ globalThis.sqlite3InitModule = sqlite3InitModule;
       db.exec("detach foo");
       T.mustThrow(()=>db.exec("select * from foo.bar"),
                   "Because foo is no longer attached.");
+    })
+
+  ////////////////////////////////////////////////////////////////////
+    .t("Read-only", function(sqlite3){
+      T.assert( 0===capi.sqlite3_db_readonly(this.db, "main") );
+      const db = new sqlite3.oo1.DB('file://'+this.db.filename+'?mode=ro');
+      T.assert( 1===capi.sqlite3_db_readonly(db, "main") );
+      T.assert( -1===capi.sqlite3_db_readonly(db, "nope") );
+      db.close();
     })
 
   ////////////////////////////////////////////////////////////////////
@@ -2824,7 +2834,7 @@ globalThis.sqlite3InitModule = sqlite3InitModule;
       name: 'Session API sanity checks',
       predicate: ()=>!!capi.sqlite3changegroup_add,
       test: function(sqlite3){
-        warn("The session API tests could use some expansion.");
+        //warn("The session API tests could use some expansion.");
         const db1 = new sqlite3.oo1.DB(), db2 = new sqlite3.oo1.DB();
         const sqlInit = [
           "create table t(rowid INTEGER PRIMARY KEY,a,b); ",
@@ -2859,7 +2869,9 @@ globalThis.sqlite3InitModule = sqlite3InitModule;
             .assert('b4' === db1.selectValue('select b from t where rowid=4'))
             .assert(3 === db1.selectValue('select count(*) from t'));
 
-          const testSessionEnable = false;
+          const testSessionEnable =
+                false /* it's not yet clear whether these test failures are
+                         broken tests or broken bindings. */;
           if(testSessionEnable){
             rc = capi.sqlite3session_enable(pSession, 0);
             T.assert( 0 === rc )
@@ -2870,7 +2882,7 @@ globalThis.sqlite3InitModule = sqlite3InitModule;
               .assert( capi.sqlite3session_enable(pSession, -1) > 0 )
               .assert(undefined === db1.selectValue('select a from t where rowid=2'));
           }else{
-            warn("sqlite3session_enable() tests are currently disabled.");
+            //warn("sqlite3session_enable() tests are currently disabled.");
           }
           let db1Count = db1.selectValue("select count(*) from t");
           T.assert( db1Count === (testSessionEnable ? 2 : 3) );
@@ -3177,15 +3189,92 @@ globalThis.sqlite3InitModule = sqlite3InitModule;
           .assert(!sqlite3.capi.sqlite3_vfs_find(sahPoolConfig.name));
 
         let cErr, u3;
-        conf2.$testThrowInInit = new Error("Testing throwing during init.");
+        conf2.$testThrowPhase2 = new Error("Testing throwing during init.");
         conf2.name = sahPoolConfig.name+'-err';
         const P3 = await inst(conf2).then(u=>u3 = u).catch((e)=>cErr=e);
-        T.assert(P3 === conf2.$testThrowInInit)
+        T.assert(P3 === conf2.$testThrowPhase2)
           .assert(cErr === P3)
           .assert(undefined === u3)
           .assert(!sqlite3.capi.sqlite3_vfs_find(conf2.name));
+        delete conf2.$testThrowPhase2;
+        T.assert(cErr === await inst(conf2).catch(e=>e),
+                "Init result is cached even if it failed");
+
+        /* Ensure that the forceReinitIfPreviouslyFailed fallback bypasses
+           the VFS init cache... */
+        cErr = u3 = undefined;
+        conf2.forceReinitIfPreviouslyFailed = true;
+        conf2.verbosity = 3;
+        const P3b = await inst(conf2).then(u=>u3 = u).catch((e)=>cErr=e);
+        T.assert(undefined === cErr)
+          .assert(P3b === u3)
+          .assert(P3b === await inst(conf2))
+          .assert(true === await u3.removeVfs())
+          .assert(false === await P3b.removeVfs());
       }
     }/*OPFS SAH Pool sanity checks*/)
+
+  ////////////////////////////////////////////////////////////////////////
+  T.g('Misc. APIs')
+    .t('bind_parameter_...', function(sqlite3){
+      const db = new sqlite3.oo1.DB();
+      db.exec("create table t(a)");
+      const stmt = db.prepare("insert into t(a) values($a)");
+      T.assert( 1===capi.sqlite3_bind_parameter_count(stmt) )
+        .assert( 1===capi.sqlite3_bind_parameter_index(stmt, "$a") )
+        .assert( 0===capi.sqlite3_bind_parameter_index(stmt, ":a") )
+        .assert( 1===stmt.getParamIndex("$a") )
+        .assert( 0===stmt.getParamIndex(":a") )
+        .assert( "$a"===capi.sqlite3_bind_parameter_name(stmt, 1) )
+        .assert( null===capi.sqlite3_bind_parameter_name(stmt, 0) )
+        .assert( "$a"===stmt.getParamName(1) )
+        .assert( null===stmt.getParamName(0) );
+      stmt.finalize();
+      db.close();
+    })
+
+  ////////////////////////////////////////////////////////////////////
+    .t("Misc. stmt_...", function(sqlite3){
+      const db = new sqlite3.oo1.DB();
+      db.exec("create table t(a doggiebiscuits); insert into t(a) values(123)");
+      const stmt = db.prepare("select a, a+1 from t");
+      T.assert( stmt.isReadOnly() )
+        .assert( 0===capi.sqlite3_stmt_isexplain(stmt) )
+        .assert( 0===capi.sqlite3_stmt_explain(stmt, 1) )
+        .assert( 0!==capi.sqlite3_stmt_isexplain(stmt) )
+        .assert( 0===capi.sqlite3_stmt_explain(stmt, 2) )
+        .assert( 0!==capi.sqlite3_stmt_isexplain(stmt) )
+        .assert( 0===capi.sqlite3_stmt_explain(stmt, 0) )
+        .assert( 0===capi.sqlite3_stmt_isexplain(stmt) );
+      let n = 0;
+      while( capi.SQLITE_ROW === capi.sqlite3_step(stmt) ){
+        ++n;
+        T.assert( 0!==capi.sqlite3_stmt_explain(stmt, 1),
+                  "Because stmt is busy" )
+          .assert( capi.sqlite3_stmt_busy(stmt) )
+          .assert( stmt.isBusy() )
+          .assert( 0!==capi.sqlite3_stmt_readonly(stmt) )
+          .assert( true===stmt.isReadOnly() );
+        const sv = capi.sqlite3_column_value(stmt, 0);
+        T.assert( 123===capi.sqlite3_value_int(sv) )
+          .assert( "doggiebiscuits"===capi.sqlite3_column_decltype(stmt,0) )
+          .assert( null===capi.sqlite3_column_decltype(stmt,1) );
+      }
+      T.assert( 1===n )
+        .assert( 0===capi.sqlite3_stmt_busy(stmt) )
+        .assert( !stmt.isBusy() );
+      stmt.finalize();
+      db.close();
+    })
+
+  ////////////////////////////////////////////////////////////////////
+    .t("interrupt", function(sqlite3){
+      const db = new sqlite3.oo1.DB();
+      T.assert( 0===capi.sqlite3_is_interrupted(db) );
+      capi.sqlite3_interrupt(db);
+      T.assert( 0!==capi.sqlite3_is_interrupted(db) );
+      db.close();
+    })
 
   ////////////////////////////////////////////////////////////////////////
   T.g('Bug Reports')
