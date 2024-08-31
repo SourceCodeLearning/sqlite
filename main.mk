@@ -42,6 +42,10 @@
 # build the SQLite library and testing tools.
 ################################################################################
 
+# If OPTIONS... is specified on the command-line, append its value to OPTS
+#
+OPTS += $(OPTIONS)
+
 # This is how we compile
 #
 TCCX =  $(TCC) $(OPTS) -I. -I$(TOP)/src -I$(TOP)
@@ -958,9 +962,14 @@ tcltest:	./testfixture$(EXE)
 testrunner:	testfixture$(EXE)
 	./testfixture$(EXE) $(TOP)/test/testrunner.tcl
 
-# Runs both fuzztest and testrunner, consecutively.
+# This is the testing target preferred by the core SQLite developers.
+# It runs tests under a standard configuration, regardless of how
+# ./configure was run.  The devs run "make devtest" prior to each
+# check-in, at a minimum.  Probably other tests too, but at least this
+# one.
 #
-devtest:	testfixture$(EXE) fuzztest testrunner
+devtest:	srctree-check sourcetest
+	tclsh $(TOP)/test/testrunner.tcl mdevtest
 
 mdevtest:
 	tclsh $(TOP)/test/testrunner.tcl mdevtest
@@ -971,10 +980,19 @@ mdevtest:
 quicktest:	./testfixture$(EXE)
 	./testfixture$(EXE) $(TOP)/test/extraquick.test $(TESTOPTS)
 
-# The default test case.  Runs most of the faster standard TCL tests,
-# and fuzz tests, and sqlite3_analyzer and sqldiff tests.
-test:	fuzztest sourcetest $(TESTPROGS) tcltest
+# Validate that various generated files in the source tree
+# are up-to-date.
+#
+srctree-check:	$(TOP)/tool/srctree-check.tcl
+	tclsh $(TOP)/tool/srctree-check.tcl
 
+# Try to run tests on whatever options are specified by the
+# environment variables.  The SQLite developers seldom use this target.
+# Instead# they use "make devtest" which runs tests on a standard set of
+# options regardless of how SQLite is configured.  This "test"
+# target is provided for legacy only.
+#
+test:	fuzztest sourcetest $(TESTPROGS) tcltest
 
 # Run a test using valgrind.  This can take a really long time
 # because valgrind is so much slower than a native machine.
@@ -1112,41 +1130,22 @@ install:	sqlite3 libsqlite3.a sqlite3.h
 	mv sqlite3.h /usr/include
 
 clean:
-	rm -f *.o sqlite3 sqlite3.exe libsqlite3.a sqlite3.h opcodes.*
-	rm -f lemon lemon.exe lempar.c parse.* sqlite*.tar.gz
-	rm -f mkkeywordhash mkkeywordhash.exe keywordhash.h
-	rm -f $(PUBLISH)
-	rm -f *.da *.bb *.bbg gmon.out
-	rm -rf tsrc target_source
-	rm -f testloadext.dll libtestloadext.so
-	rm -f amalgamation-testfixture amalgamation-testfixture.exe
-	rm -f fts3-testfixture fts3-testfixture.exe
-	rm -f testfixture testfixture.exe
-	rm -f threadtest3 threadtest3.exe
-	rm -f LogEst LogEst.exe
-	rm -f fts3view fts3view.exe
-	rm -f rollback-test rollback-test.exe
-	rm -f showdb showdb.exe
-	rm -f showjournal showjournal.exe
-	rm -f showstat4 showstat4.exe
-	rm -f showwal showwal.exe
-	rm -f changeset changeset.exe
-	rm -f speedtest1 speedtest1.exe
-	rm -f wordcount wordcount.exe
-	rm -f rbu rbu.exe
-	rm -f srcck1 srcck1.exe
-	rm -f sqlite3.c sqlite3-*.c fts?amal.c tclsqlite3.c
-	rm -f sqlite3rc.h
-	rm -f shell.c sqlite3ext.h
-	rm -f sqlite3_analyzer sqlite3_analyzer.exe sqlite3_analyzer.c
-	rm -f sqlite3_expert sqlite3_expert.exe
-	rm -f sqlite-*-output.vsix
-	rm -f mptester mptester.exe
-	rm -f fuzzershell fuzzershell.exe
-	rm -f fuzzcheck fuzzcheck.exe
-	rm -f sessionfuzz
-	rm -f sqldiff sqldiff.exe
-	rm -f fts5.* fts5parse.*
-	rm -f lsm.h lsm1.c
-	rm -f threadtest5
-	rm -f src-verify
+	rm -f *.lo *.la *.o *.c *.h *.da *.bb *.bbg gmon.* *.rws sqlite3$(TEXE)
+	rm -rf .libs .deps tsrc libtool target_source testrunner_*
+	rm -f lemon$(BEXE) sqlite*.tar.gz
+	rm -f mkkeywordhash$(BEXE) mksourceid$(BEXE)
+	rm -f parse.* fts5parse.*
+	rm -rf tsrc .target_source testrunner_bld_* testdir*
+	rm -f tclsqlite3$(TEXE)
+	rm -f $(TESTPROGS) testrunner.*
+	rm -f LogEst$(TEXE) fts3view$(TEXE) rollback-test$(TEXE) showdb$(TEXE)
+	rm -f showjournal$(TEXE) showstat4$(TEXE) showwal$(TEXE) speedtest1$(TEXE)
+	rm -f wordcount$(TEXE) changeset$(TEXE) version-info$(TEXE)
+	rm -f *.dll *.lib *.exp *.def *.pc *.vsix
+	rm -f sqlite3_analyzer$(TEXE)
+	rm -f mptester$(TEXE) rbu$(TEXE)	srcck1$(TEXE)
+	rm -f fuzzershell$(TEXE) fuzzcheck$(TEXE) sqldiff$(TEXE) dbhash$(TEXE)
+	rm -f threadtest5$(TEXE)
+	rm -f src-verify has_tclsh*
+
+distclean:	clean
