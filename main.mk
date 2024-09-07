@@ -541,6 +541,7 @@ FUZZSRC += $(TOP)/test/vt02.c
 FUZZSRC += $(TOP)/test/fuzzinvariants.c
 FUZZSRC += $(TOP)/ext/recover/dbdata.c
 FUZZSRC += $(TOP)/ext/recover/sqlite3recover.c
+FUZZSRC += $(TOP)/ext/misc/percentile.c
 FUZZSRC += $(TOP)/ext/misc/randomjson.c
 DBFUZZ_OPT =
 KV_OPT = -DSQLITE_THREADSAFE=0 -DSQLITE_DIRECT_OVERFLOW_READ
@@ -764,6 +765,7 @@ SHELL_DEP = \
     $(TOP)/ext/misc/ieee754.c \
     $(TOP)/ext/misc/memtrace.c \
     $(TOP)/ext/misc/pcachetrace.c \
+    $(TOP)/ext/misc/percentile.c \
     $(TOP)/ext/misc/regexp.c \
     $(TOP)/ext/misc/series.c \
     $(TOP)/ext/misc/shathree.c \
