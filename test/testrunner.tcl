@@ -547,7 +547,7 @@ proc show_status {db cls} {
 
   set srcdir [file dirname [file dirname $TRG(info_script)]]
   set line "Running: $S(running) (max: $nJob)"
-  if {$S(running)>0 && $fin>10} {
+  if {$S(running)>0 && $fin>10 && [string length $line]<69} {
     set tmleft [expr {($tm/$fin)*($totalw-$fin)}]
     if {$tmleft<0.02*$tm} {
       set tmleft [expr {$tm*0.02}]
@@ -663,7 +663,9 @@ if {[llength $argv]>=1
   set SQL {SELECT displaytype, displayname, state FROM jobs}
   if {$pattern!=""} {
     regsub -all {[^a-zA-Z0-9*.-/]} $pattern ? pattern
-    append SQL " WHERE displayname GLOB '*$pattern*'"
+    set pattern [string tolower $pattern]
+    append SQL \
+       " WHERE lower(concat(state,' ',displaytype,' ',displayname)) GLOB '*$pattern*'"
   }
   append SQL " ORDER BY starttime"
 

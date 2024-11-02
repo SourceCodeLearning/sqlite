@@ -9,12 +9,17 @@
 #
 #  - This file must remain devoid of GNU Make-isms.  i.e. it must be
 #  POSIX Make compatible. "bmake" (BSD make) is available on most
-#  Linux systems, so compatibility is relatively easy to test.
+#  Linux systems, so compatibility is relatively easy to test.  As a
+#  harmless exception, this file sometimes uses $(MAKEFILE_LIST) as a
+#  dependency. That var, in GNU Make, lists all of the makefile
+#  currently loaded.
 #
 # The variables listed below must be defined before this script is
 # invoked. This file will use defaults, very possibly invalid, for any
 # which are not defined.
 ########################################################################
+.POSIX: #maintenance reminder: X:=Y is not POSIX-portable
+all:
 #
 # $(TOP) =
 #
@@ -68,7 +73,7 @@ B.exe ?=
 # The DLL resp. static library counterparts of $(B.exe).
 #
 B.dll ?= .so
-B.lib ?= .lib
+B.lib ?= .a
 #
 # $(T.exe) =
 #
@@ -117,12 +122,11 @@ B.tclsh ?= $(JIMSH)
 # Various system-level directories, mostly needed for installation and
 # for finding system-level dependencies.
 #
+# Aside from ${prefix}, we do not need to (and intentionally do not)
+# export any of the dozen-ish shorthand ${XYZdir} vars the autotools
+# conventionally defines.
+#
 prefix       ?= /usr/local
-exec_prefix  ?= $(prefix)
-libdir       ?= $(prefix)/lib
-pkgconfigdir ?= $(libdir)/pkgconfig
-bindir       ?= $(prefix)/bin
-includedir   ?= $(prefix)/include
 #
 # $(LDFLAGS.{feature}) and $(CFLAGS.{feature}) =
 #
@@ -141,12 +145,12 @@ LDFLAGS.dlopen ?= -ldl
 LDFLAGS.shobj ?= -shared
 LDFLAGS.icu ?= # -licui18n -licuuc -licudata
 # libreadline (or a workalike):
-# To activate readline in the shell: SHELL_OPT = -DHAVE_READLINE
+# To activate readline in the shell: SHELL_OPT = -DHAVE_READLINE=1
 LDFLAGS.readline ?= -lreadline # these vary wildly across platforms
 CFLAGS.readline ?= -I$(prefix)/include/readline
 # ^^^ When using linenoise instead of readline, do something like:
-# SHELL_OPT += -DHAVE_LINENOISE
-# CFLAGS.readline = $(HOME)/linenoise $(HOME)/linenoise/linenoise.c
+# SHELL_OPT += -DHAVE_LINENOISE=1
+# CFLAGS.readline = -I$(HOME)/linenoise $(HOME)/linenoise/linenoise.c
 # LDFLAGS.readline = # empty
 
 #
@@ -166,6 +170,14 @@ INSTALL ?= install
 # 1 if libsqlite3.$(T.dll) should be built.
 #
 ENABLE_SHARED ?= 1
+#
+# $(ENABLE_STATIC) =
+#
+# 1 if libsqlite3.$(T.lib) should be built. Some components,
+# e.g. libtclsqlite3 and some test apps, implicitly require the static
+# library and will ignore this preference.
+#
+ENABLE_STATIC ?= 1
 #
 # $(USE_AMALGAMATION)
 #
@@ -204,23 +216,11 @@ OPT_FEATURE_FLAGS ?=
 #
 SHELL_OPT ?=
 #
-# The following TCL_vars come from tclConfig.sh
+# TCL_CONFIG_SH must, for some of the build targets, refer to a valid
+# tclConfig.sh. That script will be used to populate most of the other
+# TCL-related vars the build needs.
 #
-# Potential TODO: a shell script, similar tool/tclConfigShToTcl.sh,
-# which emits these vars in a format which we can include from this
-# makefile.
-#
-TCL_INCLUDE_SPEC ?=
-TCL_LIB_SPEC ?=
-TCL_STUB_LIB_SPEC ?=
-TCL_EXEC_PREFIX ?=
-TCL_VERSION ?=
-TCLLIBDIR ?=
-#
-# $(TCLLIB_RPATH) is the -rpath flag for libtclsqlite3, not
-# libsqlite3, and will usually differ from $(LDFLAGS.rpath).
-#
-TCLLIB_RPATH ?=
+TCL_CONFIG_SH ?=
 #
 # $(HAVE_WASI_SDK) =
 #
@@ -246,9 +246,15 @@ all:	sqlite3.h sqlite3.c
 
 #
 # $(CFLAGS) should ideally only contain flags which are relevant for
-# all binaries built for the target platform.
+# all binaries built for the target platform. However, many people
+# like to pass it to "make" without realizing that it applies to
+# dozens of apps, and they override core flags when doing so. To help
+# work around that, we expect core-most CFLAGS (only), e.g. -fPIC, to
+# be set in $(CFLAGS.core). That enables people to pass their other
+# CFLAGS without triggering, e.g., "recompile with -fPIC" errors.
 #
-T.cc += $(CFLAGS)
+CFLAGS.core ?=
+T.cc += $(CFLAGS.core) $(CFLAGS)
 
 #
 # The difference between $(OPT_FEATURE_FLAGS) and $(OPTS) is that the
@@ -298,8 +304,8 @@ T.cc.sqlite ?= $(T.cc)
 #
 CFLAGS.intree_includes = \
     -I. -I$(TOP)/src -I$(TOP)/ext/rtree -I$(TOP)/ext/icu \
-    -I$(TOP)/ext/fts3 -I$(TOP)/ext/async -I$(TOP)/ext/session \
-    -I$(TOP)/ext/misc -I$(TOP)/ext/userauth
+    -I$(TOP)/ext/fts3 -I$(TOP)/ext/session \
+    -I$(TOP)/ext/misc
 T.cc.sqlite += $(CFLAGS.intree_includes)
 
 #
@@ -321,16 +327,22 @@ T.link = $(T.cc.sqlite) $(T.link.extras)
 T.link.shared = $(T.link) $(LDFLAGS.shobj)
 
 #
-# LDFLAGS.libsqlite3 should be used with any target which either
-# results in building libsqlite3.so, compiles sqlite3.c directly, or
-# links in either of $(LIBOBJSO) or $(LIBOBJS1).  Note that these
-# flags are for the target build platform, not necessarily localhost.
-# i.e. it should be used with $(T.cc.sqlite) or $(T.link) but not $(B.cc).
+# LDFLAGS.libsqlite3 should be used with any deliverable for which any
+# of the following apply:
+#
+#  - Results in building libsqlite3.so
+#  - Compiles sqlite3.c in to an application
+#  - Links with libsqlite3.a
+#  - Links in either of $(LIBOBJSO) or $(LIBOBJS1)
+#
+# Note that these flags are for the target build platform, not
+# necessarily localhost.  i.e. it should be used with $(T.cc.sqlite)
+# or $(T.link) but not $(B.cc).
 #
 LDFLAGS.libsqlite3 = \
   $(LDFLAGS.rpath) $(LDFLAGS.pthread) \
-  $(LDFLAGS.math)$(LDFLAGS.dlopen)
-# $(LDFLAGS.zlib)
+  $(LDFLAGS.math) $(LDFLAGS.dlopen) \
+  $(LDFLAGS.zlib) $(LDFLAGS.icu)
 
 #
 # $(install-dir.XYZ) = dirs for installation.
@@ -343,16 +355,16 @@ LDFLAGS.libsqlite3 = \
 # moral of this story is that spaces in installation paths will break
 # the install process.
 #
-install-dir.bin = $(DESTDIR)$(bindir)
-install-dir.lib = $(DESTDIR)$(libdir)
+install-dir.bin = $(DESTDIR)$(prefix)/bin
+install-dir.lib = $(DESTDIR)$(prefix)/lib
 install-dir.include = $(DESTDIR)$(prefix)/include
-install-dir.pkgconfig = $(DESTDIR)$(pkgconfigdir)
+install-dir.pkgconfig = $(DESTDIR)$(prefix)/lib/pkgconfig
 install-dir.man1 = $(DESTDIR)$(prefix)/share/man/man1
 install-dir.all = $(install-dir.bin) $(install-dir.include) \
   $(install-dir.lib) $(install-dir.man1) \
   $(install-dir.pkgconfig)
 $(install-dir.all):
-	$(INSTALL) -d $@
+	$(INSTALL) -d "$@"
 
 #
 # After jimsh is compiled, we run some sanity checks to ensure that
@@ -390,7 +402,7 @@ distclean: distclean-jimsh
 # in other flavors of Make.
 #
 MAKE_SANITY_CHECK = .main.mk.checks
-$(MAKE_SANITY_CHECK): $(MAKEFILE_LIST)
+$(MAKE_SANITY_CHECK): $(MAKEFILE_LIST) $(TOP)/auto.def
 	@if [ x = "x$(TOP)" ]; then echo "Missing TOP var" 1>&2; exit 1; fi
 	@if [ ! -d "$(TOP)" ]; then echo "$(TOP) is not a directory" 1>&2; exit 1; fi
 	@if [ ! -f "$(TOP)/auto.def" ]; then echo "$(TOP) does not appear to be the top-most source dir" 1>&2; exit 1; fi
@@ -427,25 +439,26 @@ LIBOBJS0 = alter.o analyze.o attach.o auth.o \
          random.o resolve.o rowset.o rtree.o \
          sqlite3session.o select.o sqlite3rbu.o status.o stmt.o \
          table.o threads.o tokenize.o treeview.o trigger.o \
-         update.o upsert.o userauth.o utf.o util.o vacuum.o \
+         update.o upsert.o utf.o util.o vacuum.o \
          vdbe.o vdbeapi.o vdbeaux.o vdbeblob.o vdbemem.o vdbesort.o \
          vdbetrace.o vdbevtab.o vtab.o \
          wal.o walker.o where.o wherecode.o whereexpr.o \
          window.o
 LIBOBJS = $(LIBOBJS0)
 
+#
 # Object files for the amalgamation.
 #
 LIBOBJS1 = sqlite3.o
 
-# Determine the real value of LIBOBJ based on the 'configure' script
+#
+# Determine the real value of LIBOBJ based on whether the amalgamation
+# is enabled or not.
 #
 LIBOBJ = $(LIBOBJS$(USE_AMALGAMATION))
-#LIBSRC0 = $(SRC)
-#LIBSRC1 = sqlite3.c
-#LIBSRC  = $(LIBSRC$(USE_AMALGAMATION))
 $(LIBOBJ): $(MAKE_SANITY_CHECK)
 
+#
 # All of the source code files.
 #
 SRC = \
@@ -586,9 +599,6 @@ SRC += \
   $(TOP)/ext/session/sqlite3session.c \
   $(TOP)/ext/session/sqlite3session.h
 SRC += \
-  $(TOP)/ext/userauth/userauth.c \
-  $(TOP)/ext/userauth/sqlite3userauth.h
-SRC += \
   $(TOP)/ext/rbu/sqlite3rbu.h \
   $(TOP)/ext/rbu/sqlite3rbu.c
 SRC += \
@@ -618,7 +628,6 @@ TESTSRC = \
   $(TOP)/src/test8.c \
   $(TOP)/src/test9.c \
   $(TOP)/src/test_autoext.c \
-  $(TOP)/src/test_async.c \
   $(TOP)/src/test_backup.c \
   $(TOP)/src/test_bestindex.c \
   $(TOP)/src/test_blob.c \
@@ -700,7 +709,6 @@ TESTSRC += \
   $(TOP)/ext/misc/unionvtab.c \
   $(TOP)/ext/misc/wholenumber.c \
   $(TOP)/ext/misc/zipfile.c \
-  $(TOP)/ext/userauth/userauth.c \
   $(TOP)/ext/rtree/test_rtreedoc.c
 
 # Source code to the library files needed by the test fixture
@@ -755,7 +763,6 @@ TESTSRC2 = \
   $(TOP)/ext/fts3/fts3_term.c \
   $(TOP)/ext/fts3/fts3_tokenizer.c \
   $(TOP)/ext/fts3/fts3_write.c \
-  $(TOP)/ext/async/sqlite3async.c \
   $(TOP)/ext/session/sqlite3session.c \
   $(TOP)/ext/misc/stmt.c \
   fts5.c
@@ -804,8 +811,6 @@ EXTHDR += \
   $(TOP)/ext/icu/sqliteicu.h
 EXTHDR += \
   $(TOP)/ext/rtree/sqlite3rtree.h
-EXTHDR += \
-  $(TOP)/ext/userauth/sqlite3userauth.h
 
 #
 # Executables needed for testing
@@ -904,11 +909,54 @@ has_tclsh85:
 	sh $(TOP)/tool/cktclsh.sh 8.5 $(TCLSH_CMD)
 	touch has_tclsh85
 
-has_tclconfig:
+#
+# $(T.tcl.env.sh) is a shell script intended for source'ing to set
+# various TCL config info in the current shell context:
+#
+# - All info exported by tclConfig.sh
+#
+# - TCLLIBDIR = the first entry from TCL's $auto_path which refers to
+#   an existing dir, then append /sqlite3 to it. If TCLLIBDIR is
+#   provided via the environment, that value is used instead.
+#
+# Maintenance reminder: the ./ at the start of the name is required or /bin/sh
+# refuses to source it:
+#
+#   . .tclenv.sh    ==> .tclenv.sh: not found
+#   . ./.tclenv.sh  ==> fine
+#
+# It took half an hour to figure that out.
+#
+T.tcl.env.sh = ./.tclenv.sh
+$(T.tcl.env.sh): $(TCLSH_CMD) $(TCL_CONFIG_SH) $(MAKEFILE_LIST)
 	@if [ x = "x$(TCL_CONFIG_SH)" ]; then \
 		echo 'TCL_CONFIG_SH must be set to point to a "tclConfig.sh"' 1>&2; exit 1; \
 	fi
-	touch has_tclconfig
+	@if [ x != "x$(TCLLIBDIR)" ]; then echo TCLLIBDIR="$(TCLLIBDIR)"; else \
+		ld= ; \
+		for d in `echo "puts stdout \\$$auto_path" | $(TCLSH_CMD)`; do \
+			if [ -d "$$d" ]; then ld=$$d; break; fi; \
+		done; \
+		if [ x = "x$$ld" ]; then echo "Cannot determine TCLLIBDIR" 1>&2; exit 1; fi; \
+		echo "TCLLIBDIR=$$ld/sqlite3"; \
+	fi > $@; \
+	echo ". \"$(TCL_CONFIG_SH)\" || exit \$$?" >> $@
+
+#
+# $(T.tcl.env.source) is shell code to be run as part of any
+# compilation or link step which requires vars from
+# $(TCL_CONFIG_SH). All targets which use this should also have a
+# dependency on $(T.tcl.env.sh).
+#
+T.tcl.env.source = . $(T.tcl.env.sh) || exit $$?
+
+#
+# $(T.compile.tcl) and $(T.link.tcl) are TCL-specific counterparts for $(T.compile)
+# and $(T.link) which first invoke $(T.tcl.env.source). Any targets which used them
+# must have a dependency on $(T.tcl.env.sh)
+#
+T.compile.tcl = $(T.tcl.env.source); $(T.compile)
+T.link.tcl = $(T.tcl.env.source); $(T.link)
 
 #
 # This target creates a directory named "tsrc" and fills it with
@@ -947,7 +995,7 @@ sqlite3.h: $(MAKE_SANITY_CHECK) $(TOP)/src/sqlite.h.in \
 		$(TOP)/VERSION $(B.tclsh) # has_tclsh84
 	$(B.tclsh) $(TOP)/tool/mksqlite3h.tcl $(TOP) >sqlite3.h
 
-sqlite3.c:	.target_source sqlite3.h $(TOP)/tool/mksqlite3c.tcl src-verify \
+sqlite3.c:	.target_source sqlite3.h $(TOP)/tool/mksqlite3c.tcl src-verify$(B.exe) \
 		$(B.tclsh) # has_tclsh84
 	$(B.tclsh) $(TOP)/tool/mksqlite3c.tcl $(AMALGAMATION_GEN_FLAGS) $(EXTRA_SRC)
 	cp tsrc/sqlite3ext.h .
@@ -1223,19 +1271,19 @@ whereexpr.o:	$(TOP)/src/whereexpr.c $(DEPS_OBJ_COMMON)
 window.o:	$(TOP)/src/window.c $(DEPS_OBJ_COMMON)
 	$(T.cc.sqlite) $(CFLAGS.libsqlite3) -c $(TOP)/src/window.c
 
-tclsqlite.o:	$(TOP)/src/tclsqlite.c $(DEPS_OBJ_COMMON)
-	$(T.compile) -DUSE_TCL_STUBS=1 $(TCL_INCLUDE_SPEC) $(CFLAGS.intree_includes) \
+tclsqlite.o:	$(T.tcl.env.sh) $(TOP)/src/tclsqlite.c $(DEPS_OBJ_COMMON)
+	$(T.compile.tcl) -DUSE_TCL_STUBS=1 $$TCL_INCLUDE_SPEC $(CFLAGS.intree_includes) \
 		-c $(TOP)/src/tclsqlite.c
 
-tclsqlite-shell.o:	$(TOP)/src/tclsqlite.c $(DEPS_OBJ_COMMON)
-	$(T.compile) -DTCLSH -o $@ -c $(TOP)/src/tclsqlite.c $(TCL_INCLUDE_SPEC)
+tclsqlite-shell.o:	$(T.tcl.env.sh) $(TOP)/src/tclsqlite.c $(DEPS_OBJ_COMMON)
+	$(T.compile.tcl) -DTCLSH -o $@ -c $(TOP)/src/tclsqlite.c $$TCL_INCLUDE_SPEC
 
-tclsqlite-stubs.o:	$(TOP)/src/tclsqlite.c $(DEPS_OBJ_COMMON)
-	$(T.compile) -DUSE_TCL_STUBS=1 -o $@ -c $(TOP)/src/tclsqlite.c $(TCL_INCLUDE_SPEC)
+tclsqlite-stubs.o:	$(T.tcl.env.sh) $(TOP)/src/tclsqlite.c $(DEPS_OBJ_COMMON)
+	$(T.compile.tcl) -DUSE_TCL_STUBS=1 -o $@ -c $(TOP)/src/tclsqlite.c $$TCL_INCLUDE_SPEC
 
-tclsqlite3$(T.exe):	has_tclconfig tclsqlite-shell.o $(libsqlite3.LIB)
-	$(T.link) -o $@ tclsqlite-shell.o \
-		 $(libsqlite3.LIB) $(TCL_INCLUDE_SPEC) $(TCL_LIB_SPEC) $(LDFLAGS.libsqlite3)
+tclsqlite3$(T.exe):	$(T.tcl.env.sh) tclsqlite-shell.o $(libsqlite3.SO)
+	$(T.link.tcl) -o $@ tclsqlite-shell.o \
+		 $(libsqlite3.SO) $$TCL_INCLUDE_SPEC $$TCL_LIB_SPEC $(LDFLAGS.libsqlite3)
 
 # Rules to build opcodes.c and opcodes.h
 #
@@ -1276,7 +1324,9 @@ sqlite3-all.c:	sqlite3.c $(TOP)/tool/split-sqlite3c.tcl $(B.tclsh) # has_tclsh84
 #
 $(libsqlite3.LIB): $(LIBOBJ)
 	$(AR) $(AR.flags) $@ $(LIBOBJ)
-lib: $(libsqlite3.LIB)
+$(libsqlite3.LIB)-1: $(libsqlite3.LIB)
+$(libsqlite3.LIB)-0 $(libsqlite3.LIB)-:
+lib: $(libsqlite3.LIB)-$(ENABLE_STATIC)
 all: lib
 
 #
@@ -1290,40 +1340,41 @@ so: $(libsqlite3.SO)-$(ENABLE_SHARED)
 all: so
 
 #
-# Install the $(libsqlite3.SO) as $(libsqlite3.SO).$(PACKAGE_VERSION) and
-# create symlinks which point to it. Do we really need all of this
-# hoop-jumping? Can we not simply install the .so as-is to
-# libsqlite3.so (without the versioned bits)?
+# Install the $(libsqlite3.SO) as $(libsqlite3.SO).$(PACKAGE_VERSION)
+# and create symlinks which point to it:
 #
-# The historical SQLite build always used a version number of 0.8.6
-# for reasons lost to history but having something to do with libtool
-# (which is not longer used in this tree).
+# - libsqlite3.so.$(PACKAGE_VERSION)
+# - libsqlite3.so.3 =symlink-> libsqlite3.so.$(PACKAGE_VERSION)
+# - libsqlite3.so   =symlink-> libsqlite3.so.3
 #
 install-so-1: $(install-dir.lib) $(libsqlite3.SO)
-	$(INSTALL) $(libsqlite3.SO) $(install-dir.lib)
+	$(INSTALL) $(libsqlite3.SO) "$(install-dir.lib)"
 	@echo "Setting up SO symlinks..."; \
-		cd $(install-dir.lib) || exit $$?; \
+		cd "$(install-dir.lib)" || exit $$?; \
 		rm -f $(libsqlite3.SO).3 $(libsqlite3.SO).$(PACKAGE_VERSION) || exit $$?; \
 		mv $(libsqlite3.SO) $(libsqlite3.SO).$(PACKAGE_VERSION) || exit $$?; \
 		ln -s $(libsqlite3.SO).$(PACKAGE_VERSION) $(libsqlite3.SO).3 || exit $$?; \
 		ln -s $(libsqlite3.SO).3 $(libsqlite3.SO) || exit $$?; \
-		ls -la $(libsqlite3.SO) $(libsqlite3.SO).3 $(libsqlite3.SO).$(PACKAGE_VERSION)
+		ls -la $(libsqlite3.SO) $(libsqlite3.SO).3*
 install-so-0 install-so-:
-install: install-so-$(ENABLE_SHARED)
+install-so: install-so-$(ENABLE_SHARED)
+install: install-so
 
 #
 # Install $(libsqlite3.LIB)
 #
-install-lib: $(install-dir.lib) $(libsqlite3.LIB)
-	$(INSTALL.noexec) $(libsqlite3.LIB) $(install-dir.lib)
+install-lib-1: $(install-dir.lib) $(libsqlite3.LIB)
+	$(INSTALL.noexec) $(libsqlite3.LIB) "$(install-dir.lib)"
+install-lib-0 install-lib-:
+install-lib: install-lib-$(ENABLE_STATIC)
 install: install-lib
 
 #
 # Install C header files
 #
-install-includes: sqlite3.h $(install-dir.include)
-	$(INSTALL.noexec) sqlite3.h "$(TOP)/src/sqlite3ext.h" $(install-dir.include)
-install: install-includes
+install-headers: sqlite3.h $(install-dir.include)
+	$(INSTALL.noexec) sqlite3.h "$(TOP)/src/sqlite3ext.h" "$(install-dir.include)"
+install: install-headers
 
 #
 # libtclsqlite3...
@@ -1331,23 +1382,27 @@ install: install-includes
 pkgIndex.tcl:
 	echo 'package ifneeded sqlite3 $(PACKAGE_VERSION) [list load [file join $$dir libtclsqlite3[info sharedlibextension]] sqlite3]' > $@
 libtclsqlite3.SO = libtclsqlite3$(T.dll)
-$(libtclsqlite3.SO): tclsqlite.o $(libsqlite3.LIB)
+$(libtclsqlite3.SO): $(T.tcl.env.sh) tclsqlite.o $(LIBOBJ)
+	$(T.tcl.env.source); \
 	$(T.link.shared) -o $@ tclsqlite.o \
-		$(TCL_INCLUDE_SPEC) $(TCL_STUB_LIB_SPEC) $(LDFLAGS.libsqlite3) \
-		$(libsqlite3.LIB) $(TCLLIB_RPATH)
+		$$TCL_INCLUDE_SPEC $$TCL_STUB_LIB_SPEC $(LDFLAGS.libsqlite3) \
+		$(LIBOBJ) -Wl,-rpath,$$TCLLIBDIR
+# ^^^ that rpath bit is defined as TCL_LD_SEARCH_FLAGS in
+# tclConfig.sh, but it's defined in such a way as to be useless for a
+# _static_ makefile.
 $(libtclsqlite3.SO)-1: $(libtclsqlite3.SO)
 $(libtclsqlite3.SO)-0 $(libtclsqlite3.SO)-:
 libtcl: $(libtclsqlite3.SO)-$(HAVE_TCL)
 all: libtcl
 
-install.tcldir = $(DESTDIR)$(TCLLIBDIR)
-install-tcl-1: install-lib $(libtclsqlite3.SO) pkgIndex.tcl
-	@if [ "x$(DESTDIR)" = "x$(install.tcldir)" ]; then echo "TCLLIBDIR is not set." 1>&2; exit 1; fi
-	$(INSTALL) -d $(install.tcldir)
-	$(INSTALL) $(libtclsqlite3.SO) $(install.tcldir)
-	$(INSTALL.noexec) pkgIndex.tcl $(install.tcldir)
+install-tcl-1: $(libtclsqlite3.SO) pkgIndex.tcl
+	$(T.tcl.env.source); \
+	$(INSTALL) -d "$(DESTDIR)$$TCLLIBDIR"; \
+	$(INSTALL) $(libtclsqlite3.SO) "$(DESTDIR)$$TCLLIBDIR"; \
+	$(INSTALL.noexec) pkgIndex.tcl "$(DESTDIR)$$TCLLIBDIR"
 install-tcl-0 install-tcl-:
-install: install-tcl-$(HAVE_TCL)
+install-tcl: install-tcl-$(HAVE_TCL)
+install: install-tcl
 
 tclsqlite3.c:	sqlite3.c
 	echo '#ifndef USE_SYSTEM_SQLITE' >tclsqlite3.c
@@ -1372,14 +1427,14 @@ tclextension-install: tclsqlite3.c
 	$(TCLSH_CMD) $(TOP)/tool/buildtclext.tcl --cc "$(T.cc)" $(CFLAGS.tclextension)
 
 #
-# Install the SQLite TCL extension that is used by $TCLSH_CMD
+# Uninstall the SQLite TCL extension that is used by $TCLSH_CMD.
 #
 tclextension-uninstall:
 	$(TCLSH_CMD) $(TOP)/tool/buildtclext.tcl --uninstall
 
 #
-# List all installed the SQLite TCL extension that is are accessible
-# by $TCLSH_CMD, included prior versions.
+# List all installed the SQLite TCL extensions that is are accessible
+# by $TCLSH_CMD, including prior versions.
 #
 tclextension-list:
 	$(TCLSH_CMD) $(TOP)/tool/buildtclext.tcl --info
@@ -1448,10 +1503,10 @@ TESTFIXTURE_SRC1 = sqlite3.c
 TESTFIXTURE_SRC = $(TESTSRC) $(TOP)/src/tclsqlite.c
 TESTFIXTURE_SRC += $(TESTFIXTURE_SRC$(USE_AMALGAMATION))
 
-testfixture$(T.exe):	has_tclconfig has_tclsh85 $(TESTFIXTURE_SRC)
-	$(T.link) -DSQLITE_NO_SYNC=1 $(TESTFIXTURE_FLAGS) \
+testfixture$(T.exe):	$(T.tcl.env.sh) has_tclsh85 $(TESTFIXTURE_SRC)
+	$(T.link.tcl) -DSQLITE_NO_SYNC=1 $(TESTFIXTURE_FLAGS) \
 		-o $@ $(TESTFIXTURE_SRC) \
-		$(TCL_LIB_SPEC) $(TCL_INCLUDE_SPEC) \
+		$$TCL_LIB_SPEC $$TCL_INCLUDE_SPEC \
 		$(CFLAGS.libsqlite3) $(LDFLAGS.libsqlite3)
 
 coretestprogs:	testfixture$(B.exe) sqlite3$(B.exe)
@@ -1568,16 +1623,16 @@ sqlite3_analyzer.c: sqlite3.c $(TOP)/src/tclsqlite.c $(TOP)/tool/spaceanal.tcl \
                     $(TOP)/tool/mkccode.tcl $(TOP)/tool/sqlite3_analyzer.c.in has_tclsh85
 	$(B.tclsh) $(TOP)/tool/mkccode.tcl $(TOP)/tool/sqlite3_analyzer.c.in >sqlite3_analyzer.c
 
-sqlite3_analyzer$(T.exe): has_tclconfig sqlite3_analyzer.c
-	$(T.link) sqlite3_analyzer.c -o $@ $(TCL_LIB_SPEC) $(TCL_INCLUDE_SPEC) $(LDFLAGS.libsqlite3)
+sqlite3_analyzer$(T.exe): $(T.tcl.env.sh) sqlite3_analyzer.c
+	$(T.link.tcl) sqlite3_analyzer.c -o $@ $$TCL_LIB_SPEC $$TCL_INCLUDE_SPEC $(LDFLAGS.libsqlite3)
 
 sqltclsh.c: sqlite3.c $(TOP)/src/tclsqlite.c $(TOP)/tool/sqltclsh.tcl \
             $(TOP)/ext/misc/appendvfs.c $(TOP)/tool/mkccode.tcl \
             $(TOP)/tool/sqltclsh.c.in has_tclsh85
 	$(B.tclsh) $(TOP)/tool/mkccode.tcl $(TOP)/tool/sqltclsh.c.in >sqltclsh.c
 
-sqltclsh$(T.exe): has_tclconfig sqltclsh.c
-	$(T.link) sqltclsh.c -o $@ $(TCL_INCLUDE_SPEC) $(CFLAGS.libsqlite3) $(TCL_LIB_SPEC) $(LDFLAGS.libsqlite3)
+sqltclsh$(T.exe): $(T.tcl.env.sh) sqltclsh.c
+	$(T.link.tcl) sqltclsh.c -o $@ $$TCL_INCLUDE_SPEC $(CFLAGS.libsqlite3) $$TCL_LIB_SPEC $(LDFLAGS.libsqlite3)
 # xbin: target for generic binaries which aren't usually built. It is
 # used primarily for testing the build process.
 xbin: sqltclsh$(T.exe)
@@ -1601,8 +1656,8 @@ CHECKER_DEPS =\
 sqlite3_checker.c:	$(CHECKER_DEPS) has_tclsh85
 	$(B.tclsh) $(TOP)/tool/mkccode.tcl $(TOP)/ext/repair/sqlite3_checker.c.in >$@
 
-sqlite3_checker$(T.exe):	has_tclconfig sqlite3_checker.c
-	$(T.link) sqlite3_checker.c -o $@ $(TCL_INCLUDE_SPEC) $(CFLAGS.libsqlite3) $(TCL_LIB_SPEC) $(LDFLAGS.libsqlite3)
+sqlite3_checker$(T.exe):	$(T.tcl.env.sh) sqlite3_checker.c
+	$(T.link.tcl) sqlite3_checker.c -o $@ $$TCL_INCLUDE_SPEC $(CFLAGS.libsqlite3) $$TCL_LIB_SPEC $(LDFLAGS.libsqlite3)
 xbin: sqlite3_checker$(T.exe)
 
 dbdump$(T.exe): $(TOP)/ext/misc/dbdump.c sqlite3.o
@@ -1753,7 +1808,7 @@ sqlite3$(T.exe):	shell.c sqlite3.c
 	$(T.link) -o $@ \
 		shell.c sqlite3.c \
 		$(CFLAGS.readline) $(SHELL_OPT) \
-		$(LDFLAGS.libsqlite3) $(LDFLAGS.zlib) $(LDFLAGS.readline) $(LDFLAGS.icu)
+		$(LDFLAGS.libsqlite3) $(LDFLAGS.readline)
 
 #
 # Build sqlite3$(T.exe) by default except in wasi-sdk builds.  Yes, the
@@ -1764,7 +1819,7 @@ sqlite3$(T.exe)-0 sqlite3$(T.exe)-: sqlite3$(T.exe)
 all: sqlite3$(T.exe)-$(HAVE_WASI_SDK)
 
 install-shell-0: sqlite3$(TEXT) $(install-dir.bin)
-	$(INSTALL) -s sqlite3$(TEXT) $(install-dir.bin)
+	$(INSTALL) -s sqlite3$(TEXT) "$(install-dir.bin)"
 install-shell-1 install-shell-:
 install: install-shell-$(HAVE_WASI_SDK)
 
@@ -1772,7 +1827,7 @@ sqldiff$(T.exe):	$(TOP)/tool/sqldiff.c $(TOP)/ext/misc/sqlite3_stdio.h sqlite3.o
 	$(T.link) -o $@ $(TOP)/tool/sqldiff.c sqlite3.o $(LDFLAGS.libsqlite3)
 
 install-diff: sqldiff$(T.exe) $(install-dir.bin)
-	$(INSTALL) -s sqldiff$(TEXT) $(install-dir.bin)
+	$(INSTALL) -s sqldiff$(TEXT) "$(install-dir.bin)"
 #install: install-diff
 
 dbhash$(T.exe):	$(TOP)/tool/dbhash.c sqlite3.o sqlite3.h
@@ -1795,18 +1850,18 @@ sqlite3_rsync$(T.exe):	$(RSYNC_SRC)
 xbin: sqlite3_rsync$(T.exe)
 
 install-rsync: sqlite3_rsync$(T.exe) $(install-dir.bin)
-	$(INSTALL) sqlite3_rsync$(TEXT) $(install-dir.bin)
+	$(INSTALL) sqlite3_rsync$(TEXT) "$(install-dir.bin)"
 #install: install-rsync
 
 install-man1: $(install-dir.man1)
-	$(INSTALL.noexec) $(TOP)/sqlite3.1 $(install-dir.man1)
+	$(INSTALL.noexec) $(TOP)/sqlite3.1 "$(install-dir.man1)"
 install: install-man1
 
 #
 # sqlite3.pc is typically generated by the configure script but could
 # conceivably be generated by hand.
 install-pc: sqlite3.pc $(install-dir.pkgconfig)
-	$(INSTALL.noexec) sqlite3.pc $(install-dir.pkgconfig)
+	$(INSTALL.noexec) sqlite3.pc "$(install-dir.pkgconfig)"
 
 scrub$(T.exe):	$(TOP)/ext/misc/scrub.c sqlite3.o
 	$(T.link) -o $@ -I. -DSCRUB_STANDALONE \
@@ -1921,8 +1976,6 @@ mptest:	mptester$(T.exe)
 # Source and header files that shell.c depends on
 SHELL_DEP = \
     $(TOP)/src/shell.c.in \
-    $(TOP)/ext/consio/console_io.c \
-    $(TOP)/ext/consio/console_io.h \
     $(TOP)/ext/expert/sqlite3expert.c \
     $(TOP)/ext/expert/sqlite3expert.h \
     $(TOP)/ext/intck/sqlite3intck.c \
@@ -2003,9 +2056,6 @@ fts3_write.o:	$(TOP)/ext/fts3/fts3_write.c $(DEPS_EXT_COMMON)
 rtree.o:	$(TOP)/ext/rtree/rtree.c $(DEPS_EXT_COMMON)
 	$(T.cc.extension) -c $(TOP)/ext/rtree/rtree.c
 
-userauth.o:	$(TOP)/ext/userauth/userauth.c $(DEPS_EXT_COMMON)
-	$(T.cc.extension) -c $(TOP)/ext/userauth/userauth.c
-
 sqlite3session.o:	$(TOP)/ext/session/sqlite3session.c $(DEPS_EXT_COMMON)
 	$(T.cc.extension) -c $(TOP)/ext/session/sqlite3session.c
 
@@ -2024,6 +2074,29 @@ sqlite3.def: $(LIBOBJ)
 sqlite3.dll: $(LIBOBJ) sqlite3.def
 	$(T.cc.sqlite) $(LDFLAGS.shobj) -o $@ sqlite3.def \
 		-Wl,"--strip-all" $(LIBOBJ)
+
+#
+# Emit a list of commonly-used targets
+help:
+	@echo; echo "Frequently-used high-level make targets:"; echo; \
+	echo " - all [default] = builds most components"; \
+	echo " - clean         = cleans up most build products"; \
+	echo " - distclean     = cleans up all build products"; \
+	echo " - install       = installs activated components"; \
+	echo; echo "Testing-related targets:"; echo; \
+	echo " - test          = a number of sanity checks"; \
+	echo " - quicktest     = minimal tests"; \
+	echo " - releasetest   = pre-release tests"; \
+	echo " - devtest       = Minimum tests required before code check-ins"; \
+	echo " - mdevtest      = A variant of devtest"; \
+	echo " - sdevtest      = A variant of devtest"; \
+	echo " - tcltest       = Runs test/veryquick.test"; \
+	echo " - testrunner    = Like tcltest but spread across multiple cores"; \
+	echo " - fuzztest      = The core fuzz tester (see target docs for important info)"; \
+	echo " - valgrindfuzz  = Runs fuzztest under valgrind"; \
+	echo " - soaktest      = Really, really long tests"; \
+	echo " - alltest       = Runs most or all TCL tests"; \
+	echo
 
 
 # Remove build products sufficient so that subsequent makes will recompile
@@ -2057,8 +2130,8 @@ tidy: tidy-.
 	rm -f sessionfuzz$(T.exe) changesetfuzz$(T.exe)
 	rm -f dbdump$(T.exe) dbtotxt$(T.exe) atrc$(T.exe)
 	rm -f threadtest5$(T.exe)
-	rm -f src-verify$(B.exe) has_tclsh* has_tclconfig
-	rm -f tclsqlite3.c
+	rm -f src-verify$(B.exe)
+	rm -f tclsqlite3.c has_tclsh* $(T.tcl.env.sh)
 	rm -f sqlite3rc.h sqlite3.def
 
 #
@@ -2071,3 +2144,11 @@ clean:	clean-. tidy
 # Clean up everything.  No exceptions.
 distclean-.:
 distclean:	distclean-. clean
+
+
+# Show important variable settings.
+show-variables:	
+	@echo "CC          = $(CC)"
+	@echo "B.cc        = $(B.cc)"
+	@echo "T.cc        = $(T.cc)"
+	@echo "T.cc.sqlite = $(T.cc.sqlite)"
