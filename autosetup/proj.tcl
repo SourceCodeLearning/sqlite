@@ -77,14 +77,21 @@ proc proj-fatal {msg} {
 ########################################################################
 # @proj-assert script
 #
-# Kind of like a C assert if uplevel (eval) of $script is false,
-# triggers a fatal error.
-proc proj-assert {script} {
+# Kind of like a C assert: if uplevel (eval) of [expr {$script}] is
+# false, a fatal error is triggered. The error message, by default,
+# includes the body of the failed assertion, but if $descr is set then
+# that is used instead.
+proc proj-assert {script {descr ""}} {
   if {1 == [get-env proj-assert 0]} {
-    msg-result [proj-bold "asserting: [string trim $script]"]
+    msg-result [proj-bold "asserting: $script"]
   }
-  if {![uplevel 1 $script]} {
-    proj-fatal "Assertion failed: $script"
+  set x {expr }
+  append x \{ $script \}
+  if {![uplevel 1 $x]} {
+    if {"" eq $descr} {
+      set descr $script
+    }
+    proj-fatal "Assertion failed: $descr"
   }
 }
 
@@ -386,13 +393,13 @@ proc proj-if-opt-truthy {boolFlag thenScript {elseScript {}}} {
 }
 
 ########################################################################
-# @proj-define-if-opt-truthy flag def ?msg? ?iftrue? ?iffalse?
+# @proj-define-for-opt flag def ?msg? ?iftrue? ?iffalse?
 #
 # If [proj-opt-truthy $flag] then [define $def $iftrue] else [define
 # $def $iffalse]. If $msg is not empty, output [msg-checking $msg] and
 # a [msg-results ...] which corresponds to the result. Returns 1 if
 # the opt-truthy check passes, else 0.
-proc proj-define-if-opt-truthy {flag def {msg ""} {iftrue 1} {iffalse 0}} {
+proc proj-define-for-opt {flag def {msg ""} {iftrue 1} {iffalse 0}} {
   if {"" ne $msg} {
     msg-checking "$msg "
   }
@@ -940,7 +947,7 @@ proc proj-check-rpath {} {
 #
 # Checks whether CC supports the -Wl,soname,lib... flag. If so, it
 # returns 1 and defines LDFLAGS_SONAME_PREFIX to the flag's prefix, to
-# which the client would need to append "libwhatever.N". If not, it
+# which the client would need to append "libwhatever.N".  If not, it
 # returns 0 and defines LDFLAGS_SONAME_PREFIX to an empty string.
 #
 # The libname argument is only for purposes of running the flag
@@ -1200,10 +1207,9 @@ proc proj-which-linenoise {dotH} {
 proc proj-remap-autoconf-dir-vars {} {
   set prefix [get-define prefix]
   set exec_prefix [get-define exec_prefix $prefix]
-  # Note that the ${...} here refers to make-side var derefs, not
-  # TCL-side vars. They must be formulated such that they are legal
-  # for use in (A) makefiles, (B) pkgconfig files, and (C) TCL's
-  # [subst] command. i.e. they must use the form ${X}.
+  # The following var derefs must be formulated such that they are
+  # legal for use in (A) makefiles, (B) pkgconfig files, and (C) TCL's
+  # [subst] command.  i.e. they must use the form ${X}.
   foreach {flag makeVar makeDeref} {
     exec-prefix     exec_prefix    ${prefix}
     datadir         datadir        ${prefix}/share
