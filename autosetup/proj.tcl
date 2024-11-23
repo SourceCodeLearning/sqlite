@@ -85,8 +85,7 @@ proc proj-assert {script {descr ""}} {
   if {1 == [get-env proj-assert 0]} {
     msg-result [proj-bold "asserting: $script"]
   }
-  set x {expr }
-  append x \{ $script \}
+  set x "expr \{ $script \}"
   if {![uplevel 1 $x]} {
     if {"" eq $descr} {
       set descr $script
@@ -312,11 +311,11 @@ proc proj-first-bin-of {args} {
 ########################################################################
 # @proj-opt-was-provided key
 #
-# Returns 1 if the user specifically provided the given configure
-# flag, else 0. This can be used to distinguish between options which
-# have a default value and those which were explicitly provided by the
-# user, even if the latter is done in a way which uses the default
-# value.
+# Returns 1 if the user specifically provided the given configure flag
+# or if it was specifically set using proj-opt-set, else 0. This can
+# be used to distinguish between options which have a default value
+# and those which were explicitly provided by the user, even if the
+# latter is done in a way which uses the default value.
 #
 # For example, with a configure flag defined like:
 #
