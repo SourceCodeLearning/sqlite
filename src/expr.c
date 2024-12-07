@@ -2646,7 +2646,7 @@ static int sqlite3ExprIsTableConstant(Expr *p, int iCur, int bAllowSubq){
 **         (4a)  pExpr must come from an ON clause..
 **         (4b)  and specifically the ON clause associated with the LEFT JOIN.
 **
-**   (5)  If pSrc is not the right operand of a LEFT JOIN or the left
+**   (5)  If pSrc is the right operand of a LEFT JOIN or the left
 **        operand of a RIGHT JOIN, then pExpr must be from the WHERE
 **        clause, not an ON clause.
 **
@@ -6484,7 +6484,7 @@ static int sqlite3ExprIsIIF(sqlite3 *db, const Expr *pExpr){
     if( NEVER(pDef==0) ) return 0;
 #endif
     if( (pDef->funcFlags & SQLITE_FUNC_INLINE)==0 ) return 0;
-    if( NEVER(SQLITE_PTR_TO_INT(pDef->pUserData)!=INLINEFUNC_iif) ) return 0;
+    if( SQLITE_PTR_TO_INT(pDef->pUserData)!=INLINEFUNC_iif ) return 0;
   }else if( pExpr->op==TK_CASE ){
     if( pExpr->pLeft!=0 ) return 0;
   }else{
