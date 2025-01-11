@@ -600,6 +600,7 @@ static int SQLITE_TCLAPI test_get_table_printf(
   }
   sqlite3_free(zSql);
   sqlite3_snprintf(sizeof(zBuf), zBuf, "%d", rc);
+  Tcl_ResetResult(interp);
   Tcl_AppendElement(interp, zBuf);
   if( rc==SQLITE_OK ){
     if( argc==4 ){
@@ -7552,6 +7553,10 @@ static int SQLITE_TCLAPI test_wal_autocheckpoint(
 
 /*
 ** tclcmd:  test_sqlite3_log ?SCRIPT?
+**
+** Caution:  If you register a log callback, you must deregister it (by
+** invoking test_sqlite3_log with no arguments) prior to closing the
+** Tcl interpreter or else a memory error will occur.
 */
 static struct LogCallback {
   Tcl_Interp *pInterp;
@@ -7583,7 +7588,7 @@ static int SQLITE_TCLAPI test_sqlite3_log(
     logcallback.pInterp = 0;
     sqlite3_config(SQLITE_CONFIG_LOG, (void*)0, (void*)0);
   }
-  if( objc>1 ){
+  if( objc>1 && Tcl_GetString(objv[1])[0]!=0 ){
     logcallback.pObj = objv[1];
     Tcl_IncrRefCount(logcallback.pObj);
     logcallback.pInterp = interp;
