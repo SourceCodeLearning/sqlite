@@ -185,7 +185,7 @@ endif
 # Find wasm-strip, which we need for release builds (see below for
 # why) but not strictly for non-release builds.
 ifeq (1,$(MAKING_CLEAN))
-  wasm-strip-bin := irrelevant
+  wasm-strip.bin := irrelevant
 else
   wasm-strip.bin ?= $(shell which wasm-strip 2>/dev/null)
   ifeq (,$(wasm-strip.bin))
@@ -1052,6 +1052,7 @@ $(speedtest1.js): $(MAKEFILE) $(speedtest1.cfiles) \
         $(speedtest1.exit-runtime0) \
         -o $@ $(speedtest1.cfiles) -lm
 	$(maybe-wasm-strip) $(speedtest1.wasm)
+	sed -i -e '/^var _sqlite3.*createExportWrapper/d' $@
 	chmod -x $(speedtest1.wasm)
 	ls -la $@ $(speedtest1.wasm)
 
