@@ -3437,6 +3437,71 @@ globalThis.sqlite3InitModule = sqlite3InitModule;
         }
       }
     })
+    .t({
+      /* https://github.com/sqlite/sqlite-wasm/issues/92 */
+      name: 'sqlite3_set_auxdata() binding signature',
+      test: function(sqlite3){
+        const db = new sqlite3.oo1.DB();
+        const stack = wasm.pstack.pointer;
+        const pAux = wasm.pstack.alloc(4);
+        let pAuxDestructed = 0;
+        const pAuxDtor = wasm.installFunction('v(p)', function(ptr){
+          //log("freeing auxdata");
+          ++pAuxDestructed;
+        });
+        let pAuxDtorDestructed = false;
+        db.onclose = {
+          after: ()=>{
+            pAuxDtorDestructed = true;
+            wasm.uninstallFunction(pAuxDtor);
+          }
+        };
+        let nAuxSet = 0 /* how many times we set aux data */;
+        let nAuxReused = 0 /* how many times we reused aux data */;
+        try{
+          db.createFunction("auxtest",{
+            xFunc: function(pCx, x, y){
+              T.assert(wasm.isPtr(pCx));
+              const localAux = capi.sqlite3_get_auxdata(pCx, 0);
+              if( !localAux ){
+                //log("setting auxdata");
+                /**
+                   We do not currently an automated way to clean up
+                   auxdata finalizer functions (the 4th argument to
+                   sqlite3_set_auxdata()) which get automatically
+                   converted from JS to WASM. Because of that, enabling
+                   automated conversions here would lead to leaks more
+                   often than not. Instead, follow the pattern show in
+                   this function: use wasm.installFunction() to create
+                   the function, then pass the resulting function
+                   pointer this function, and cleanup (at some point)
+                   using wasm.uninstallFunction().
+                */
+                ++nAuxSet;
+                capi.sqlite3_set_auxdata(pCx, 0, pAux, pAuxDtor);
+              }else{
+                //log("reusing auxdata",localAux);
+                T.assert(pAux===localAux);
+                ++nAuxReused;
+              }
+              return x;
+            }
+          });
+          db.exec([
+            "create table t(a);",
+            "insert into t(a) values(1),(2),(3);",
+            "select auxtest(1,a), auxtest(1,a) from t order by a"
+          ]);
+        }finally{
+          db.close();
+          wasm.pstack.restore(stack);
+        }
+        T.assert(nAuxSet>0).assert(nAuxReused>0)
+          .assert(6===nAuxReused+nAuxSet);
+        T.assert(pAuxDestructed>0);
+        T.assert(pAuxDtorDestructed);
+      }
+    })
   ;/*end of Bug Reports group*/;
 
   ////////////////////////////////////////////////////////////////////////
