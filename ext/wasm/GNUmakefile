@@ -165,7 +165,7 @@ dir.wasmfs := $(dir.dout)
 
 MKDIR.bld := $(dir.tmp)
 $(MKDIR.bld):
-	-mkdir -p $@ $(dir.dout)
+	@mkdir -p $@ $(dir.dout)
 
 CLEAN_FILES += *~ $(dir.jacc)/*~ $(dir.api)/*~ $(dir.common)/*~ $(dir.fiddle)/*~ \
   $(dir.fiddle-debug)/* $(dir.dout)/* $(dir.tmp)/*
@@ -424,8 +424,8 @@ define SQLITE.CALL.C-PP.FILTER
 # $1 = Input file: c-pp -f $(1).js
 # $2 = Output file: c-pp -o $(2).js
 # $3 = optional c-pp -D... flags
-$(2): $(1) $$(MAKEFILE) $$(bin.c-pp)
-	mkdir -p $$(dir $$@)
+$(2): $(1) $$(MAKEFILE_LIST) $$(bin.c-pp)
+	@mkdir -p $$(dir $$@)
 	$$(bin.c-pp) -f $(1) -o $$@ $(3) $(SQLITE.CALL.C-PP.FILTER.global)
 #CLEAN_FILES += $(2)
 endef
@@ -619,6 +619,12 @@ emcc.exportedRuntimeMethods := \
 emcc.jsflags += $(emcc.exportedRuntimeMethods)
 emcc.jsflags += -sUSE_CLOSURE_COMPILER=0
 emcc.jsflags += -sIMPORTED_MEMORY
+ifeq (,$(filter -O0,$(emcc_opt)))
+emcc.assert ?= 0
+else
+emcc.assert ?= 2
+endif
+emcc.jsflags += -sASSERTIONS=$(emcc.assert)
 emcc.jsflags += -sSTRICT_JS=0
 # STRICT_JS disabled due to:
 #   https://github.com/emscripten-core/emscripten/issues/18610
