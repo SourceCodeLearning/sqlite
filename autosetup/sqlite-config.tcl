@@ -237,6 +237,28 @@ proc sqlite-config-bootstrap {buildMode} {
       }
     }
 
+    # Options primarily for downstream packagers/package maintainers
+    packaging {
+      {autoconf} {
+        # --disable-static-shell: https://sqlite.org/forum/forumpost/cc219ee704
+        static-shell=1       => {Link the sqlite3 shell app against the DLL instead of embedding sqlite3.c}
+      }
+      {*} {
+        # soname: https://sqlite.org/src/forumpost/5a3b44f510df8ded
+        soname:=legacy
+          => {SONAME for libsqlite3.so. "none", or not using this flag, sets no
+              soname. "legacy" sets it to its historical value of
+              libsqlite3.so.0.  A value matching the glob "libsqlite3.*" sets
+              it to that literal value. Any other value is assumed to be a
+              suffix which gets applied to "libsqlite3.so.",
+              e.g. --soname=9.10 equates to "libsqlite3.so.9.10".}
+        # out-implib: https://sqlite.org/forum/forumpost/0c7fc097b2
+        out-implib=0
+          => {Enable use of --out-implib linker flag to generate an
+              "import library" for the DLL}
+      }
+    }
+
     # Options mostly for sqlite's own development
     developer {
       {*} {
@@ -263,24 +285,6 @@ proc sqlite-config-bootstrap {buildMode} {
         dump-defines=0       => {Dump autosetup defines to $::sqliteConfig(dump-defines-txt) (for build debugging)}
       }
     }
-
-    # Options specifically for downstream package maintainers
-    packaging {
-      {*} {
-        # soname: https://sqlite.org/src/forumpost/5a3b44f510df8ded
-        soname:=legacy
-          => {SONAME for libsqlite3.so. "none", or not using this flag, sets no
-              soname. "legacy" sets it to its historical value of
-              libsqlite3.so.0.  A value matching the glob "libsqlite3.*" sets
-              it to that literal value. Any other value is assumed to be a
-              suffix which gets applied to "libsqlite3.so.",
-              e.g. --soname=9.10 equates to "libsqlite3.so.9.10".}
-        # out-implib: https://sqlite.org/forum/forumpost/0c7fc097b2
-        out-implib=0
-          => {Enable use of --out-implib linker flag to generate an
-              "import library" for the DLL}
-      }
-    }
   }; # $allOpts
 
   # Filter allOpts to create the set of [options] legal for this build
@@ -295,14 +299,14 @@ proc sqlite-config-bootstrap {buildMode} {
       }
     }
   }
-  if {0} {
-    #puts "options = $opts"; exit 0
-    options $opts
-    sqlite-post-options-init
-  } else {
-    # Workaround for https://github.com/msteveb/autosetup/issues/73
-    return $opts
+  #lappend opts "soname:=duplicateEntry => {x}"; #just testing
+  if {[catch {options $opts}]} {
+    # Workaround for <https://github.com/msteveb/autosetup/issues/73>
+    # where [options] behaves oddly on _some_ TCL builds when it's
+    # called from deeper than the global scope.
+    return -code break
   }
+  sqlite-post-options-init
 }; # sqlite-config-bootstrap
 
 ########################################################################
@@ -1222,7 +1226,7 @@ proc sqlite-check-mac-cversion {} {
   define LDFLAGS_MAC_CVERSION ""
   set rc 0
   if {[proj-looks-like-mac]} {
-    cc-with {} {
+    cc-with {-link 1} {
       # These version numbers are historical libtool-defined values, not
       # library-defined ones
       if {[cc-check-flags "-Wl,-current_version,9.6.0"]
@@ -1246,22 +1250,28 @@ proc sqlite-check-mac-cversion {} {
 # (e.g. mingw). Returns 1 if supported, else 0.
 #
 # If the configure flag --out-implib is not used then this is a no-op.
-# The feature is specifically opt-in because on some platforms the
-# feature test will pass but using that flag will fail at link-time
-# (e.g. OpenBSD).
+# If that flag is used but the capability is not available, a fatal
+# error is triggered.
+#
+# This feature is specifically opt-in because it's supported on far
+# more platforms than actually need it and enabling it causes creation
+# of libsqlite3.so.a files which are unnecessary in most environments.
 #
 # Added in response to: https://sqlite.org/forum/forumpost/0c7fc097b2
 proc sqlite-check-out-implib {} {
   define LDFLAGS_OUT_IMPLIB ""
   set rc 0
   if {[proj-opt-was-provided out-implib]} {
-    cc-with {} {
+    cc-with {-link 1} {
       set dll "libsqlite3[get-define TARGET_DLLEXT]"
       set flags "-Wl,--out-implib,${dll}.a"
       if {[cc-check-flags $flags]} {
         define LDFLAGS_OUT_IMPLIB $flags
         set rc 1
       }
+    }
+    if {!$rc} {
+      user-error "--out-implib is not supported on this platform"
     }
   }
   return $rc

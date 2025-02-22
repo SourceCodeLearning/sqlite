@@ -8,12 +8,7 @@
 # included in this source tree as ./autosetup/jimsh0.c.
 #
 use sqlite-config
-if {0} {
-  sqlite-config-bootstrap autoconf
-} else {
-  options [sqlite-config-bootstrap autoconf]
-  sqlite-post-options-init
-}
+sqlite-config-bootstrap autoconf
 sqlite-check-common-bins
 sqlite-check-common-system-deps
 proj-check-rpath
@@ -27,6 +22,7 @@ sqlite-handle-load-extension
 sqlite-handle-math
 sqlite-handle-icu
 
+define ENABLE_STATIC_SHELL [opt-bool static-shell]
 define ENABLE_LIB_SHARED [opt-bool shared]
 define ENABLE_LIB_STATIC [opt-bool static]
 
