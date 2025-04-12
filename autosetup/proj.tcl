@@ -15,12 +15,16 @@
 # The intent is that these routines be relatively generic, independent
 # of a given project.
 #
+# For practical purposes, the copy of this file hosted in the SQLite
+# project is the "canonical" one:
+#
+# https://sqlite.org/src/file/autosetup/proj.tcl
+#
 # This file was initially derived from one used in the libfossil
 # project, authored by the same person who ported it here, and this is
 # noted here only as an indication that there are no licensing issues
 # despite this code having a handful of near-twins running around a
 # handful of third-party source trees.
-#
 ########################################################################
 #
 # Design notes:
@@ -54,24 +58,34 @@
 # $proj_ is an internal-use-only array for storing whatever generic
 # internal stuff we need stored.
 array set proj_ {}
+#
+# List of dot-in files to filter in the final stages of
+# configuration. Some configuration steps may append to this.  Each
+# one in this list which exists will trigger the generation of a
+# file with that same name, minus the ".in", in the build directory
+# (which differ from the source dir in out-of-tree builds).
+#
+# See: proj-dot-ins-append and proj-dot-ins-process
+#
+set proj_(dot-in-files) {}
 set proj_(isatty) [isatty? stdout]
 
 ########################################################################
 # @proj-warn msg
 #
 # Emits a warning message to stderr.
-proc proj-warn {msg} {
+proc proj-warn {args} {
   show-notices
-  puts stderr "WARNING: $msg"
+  puts stderr "WARNING: $args"
 }
 
 ########################################################################
 # @proj-error msg
 #
 # Emits an error message to stderr and exits with non-0.
-proc proj-fatal {msg} {
+proc proj-fatal {args} {
   show-notices
-  puts stderr "ERROR: $msg"
+  puts stderr "ERROR: \[[proj-current-scope 1]]: $args"
   exit 1
 }
 
@@ -101,11 +115,11 @@ proc proj-assert {script {msg ""}} {
 # If this function believes that the current console might support
 # ANSI escape sequences then this returns $str wrapped in a sequence
 # to bold that text, else it returns $str as-is.
-proc proj-bold {str} {
+proc proj-bold {args} {
   if {$::autosetup(iswin) || !$::proj_(isatty)} {
     return $str
   }
-  return "\033\[1m${str}\033\[0m"
+  return "\033\[1m${args}\033\[0m"
 }
 
 ########################################################################
@@ -634,10 +648,12 @@ proc proj-file-write {args} {
 # which controls whether to run/skip this check.
 #
 # Returns 1 if supported, else 0. Defines MAKE_COMPILATION_DB to "yes"
-# if supported, "no" if not.
+# if supported, "no" if not. The use of MAKE_COMPILATION_DB is
+# deprecated/discouraged. It also sets HAVE_COMPILE_COMMANDS to 0 or
+# 1, and that's the preferred usage.
 #
-# This test has a long history of false positive results because of
-# compilers reacting differently to the -MJ flag.
+# ACHTUNG: this test has a long history of false positive results
+# because of compilers reacting differently to the -MJ flag.
 proc proj-check-compile-commands {{configFlag {}}} {
   msg-checking "compile_commands.json support... "
   if {"" ne $configFlag && ![proj-opt-truthy $configFlag]} {
@@ -650,11 +666,13 @@ proc proj-check-compile-commands {{configFlag {}}} {
       # Martin G.'s older systems. drh also reports a false
       # positive on an unspecified older Mac system.
       msg-result "compiler supports compile_commands.json"
-      define MAKE_COMPILATION_DB yes
+      define MAKE_COMPILATION_DB yes; # deprecated
+      define HAVE_COMPILE_COMMANDS 1
       return 1
     } else {
       msg-result "compiler does not support compile_commands.json"
       define MAKE_COMPILATION_DB no
+      define HAVE_COMPILE_COMMANDS 0
       return 0
     }
   }
@@ -670,11 +688,18 @@ proc proj-touch {filename} {
 }
 
 ########################################################################
-# @proj-make-from-dot-in ?-touch? filename...
+# @proj-make-from-dot-in ?-touch? infile ?outfile?
 #
-# Uses [make-template] to create makefile(-like) file(s) $filename
-# from $filename.in but explicitly makes the output read-only, to
-# avoid inadvertent editing (who, me?).
+# Uses [make-template] to create makefile(-like) file(s) $outfile from
+# $infile but explicitly makes the output read-only, to avoid
+# inadvertent editing (who, me?).
+#
+# If $outfile is empty then:
+#
+# - If $infile is a 2-element list, it is assumed to be an in/out pair,
+#   and $outfile is set from the 2nd entry in that list. Else...
+#
+# - $outfile is set to $infile stripped of its extension.
 #
 # If the first argument is -touch then the generated file is touched
 # to update its timestamp. This can be used as a workaround for
@@ -684,25 +709,34 @@ proc proj-touch {filename} {
 #
 # Failures when running chmod or touch are silently ignored.
 proc proj-make-from-dot-in {args} {
-  set filename $args
+  set fIn ""
+  set fOut ""
   set touch 0
   if {[lindex $args 0] eq "-touch"} {
     set touch 1
-    set filename [lrange $args 1 end]
+    lassign $args - fIn fOut
+  } else {
+    lassign $args fIn fOut
   }
-  foreach f $filename {
-    set f [string trim $f]
-    if {[file exists $f]} {
-      catch { exec chmod u+w $f }
+  if {"" eq $fOut} {
+    if {[llength $fIn]>1} {
+      lassign $fIn fIn fOut
+    } else {
+      set fOut [file rootname $fIn]
     }
-    make-template $f.in $f
-    if {$touch} {
-      proj-touch $f
-    }
-    catch {
-      exec chmod -w $f
-      #file attributes -w $f; #jimtcl has no 'attributes'
-    }
+  }
+  #puts "filenames=$filename"
+  if {[file exists $fOut]} {
+    catch { exec chmod u+w $fOut }
+  }
+  #puts "making template: $fIn ==> $fOut"
+  make-template $fIn $fOut
+  if {$touch} {
+    proj-touch $fOut
+  }
+  catch {
+    exec chmod -w $fOut
+    #file attributes -w $f; #jimtcl has no 'attributes'
   }
 }
 
@@ -1229,6 +1263,11 @@ proc proj-dump-defs-json {file args} {
 # over any values from hidden aliases into their canonical names, such
 # that [opt-value canonical] will return X if --alias=X is passed to
 # configure.
+#
+# That said: autosetup's [opt-src] does support alias forms, but it
+# requires that the caller know all possible aliases. It's simpler, in
+# terms of options handling, if there's only a single canonical name
+# which each down-stream call of [opt-...] has to know.
 proc proj-xfer-options-aliases {mapping} {
   foreach {hidden - canonical} [proj-strip-hash-comments $mapping] {
     if {[proj-opt-was-provided $hidden]} {
@@ -1383,14 +1422,24 @@ proc proj-get-env {var {dflt ""}} {
 }
 
 ########################################################################
-# @proj-current-proc-name
+# @proj-current-scope ?lvl?
 #
 # Returns the name of the _calling_ proc from ($lvl + 1) levels up the
 # call stack (where the caller's level will be 1 up from _this_
-# call). It is not legal to call this from the top scope.
-proc proj-current-proc-name {{lvl 0}} {
+# call). If $lvl would resolve to global scope "global scope" is
+# returned and if it would be negative then a string indicating such
+# is returned (as opposed to throwing an error).
+proc proj-current-scope {{lvl 0}} {
   #uplevel [expr {$lvl + 1}] {lindex [info level 0] 0}
-  lindex [info level [expr {-$lvl - 1}]] 0
+  set ilvl [info level]
+  set offset [expr {$ilvl  - $lvl - 1}]
+  if { $offset < 0} {
+    return "invalid scope ($offset)"
+  } elseif { $offset == 0} {
+    return "global scope"
+  } else {
+    return [lindex [info level $offset] 0]
+  }
 }
 
 
@@ -1475,4 +1524,148 @@ proc proj-tweak-default-env-dirs {} {
     }
   }
   return 0
+}
+
+########################################################################
+# @proj-dot-ins-append file ?fileOut ?postProcessScript??
+#
+# Queues up an autosetup [make-template]-style file to be processed
+# at a later time using [proj-dot-ins-process].
+#
+# $file is the input file. If $fileOut is empty then this function
+# derives $fileOut from $file, stripping both its directory and
+# extension parts. i.e. it defaults to writing the output to the
+# current directory (typically $::autosetup(builddir)).
+#
+# If $postProcessScript is not empty then, during
+# [proj-dot-ins-process], it will be eval'd immediately after
+# processing the file. In the context of that script, the vars
+# $fileIn and $fileOut will be set to the input and output file
+# names.  This can be used, for example, to make the output file
+# executable or perform validation on its.
+#
+# See [proj-dot-ins-process], [proj-dot-ins-list]
+proc proj-dot-ins-append {fileIn args} {
+  set srcdir $::autosetup(srcdir)
+  switch -exact -- [llength $args] {
+    0 {
+      lappend fileIn [file rootname [file tail $fileIn]] ""
+    }
+    1 {
+      lappend fileIn [join $args] ""
+    }
+    2 {
+      lappend fileIn {*}$args
+    }
+    default {
+      proj-fatal "Too many arguments: $fileIn $args"
+    }
+  }
+  #puts "******* [proj-current-scope]: adding $fileIn"
+  lappend ::proj_(dot-in-files) $fileIn
+}
+
+########################################################################
+# @proj-dot-ins-list
+#
+# Returns the current list of [proj-dot-ins-append]'d files, noting
+# that each entry is a 3-element list of (inputFileName,
+# outputFileName, postProcessScript).
+proc proj-dot-ins-list {} {
+  return $::proj_(dot-in-files)
+}
+
+########################################################################
+# @proj-dot-ins-process ?-touch?
+#
+# Each file which has previously been passed to [proj-dot-ins-append]
+# is processed, with its passing its in-file out-file names to
+# [proj-make-from-dot-in].
+#
+# The optional argument may be the -touch flag, which is passed on to
+# that [proj-make-from-dot-in].
+#
+# The intent is that a project accumulate any number of files to
+# filter and delay their actual filtering until the last stage of the
+# configure script, calling this function at that time.
+proc proj-dot-ins-process {args} {
+  set flags ""
+  if {"-touch" eq $args} {
+    set flags "-touch"
+  }
+  foreach f $::proj_(dot-in-files) {
+    proj-assert {3==[llength $f]}
+    lassign $f fIn fOut fScript
+    #puts "DOING $fIn  ==> $fOut"
+    proj-make-from-dot-in {*}$flags $fIn $fOut
+    if {"" ne $fScript} {
+      uplevel 1 "set fileIn $fIn; set fileOut $fOut; eval {$fScript}"
+    }
+  }
+}
+
+########################################################################
+# @proj-validate-no-unresolved-ats filenames...
+#
+# For each filename given to it, it validates that the file has no
+# unresolved @VAR@ references. If it finds any, it produces an error
+# with location information.
+#
+# Exception: if a filename matches the pattern {*[Mm]ake*} AND a given
+# line begins with a # (not including leading whitespace) then that
+# line is ignored for purposes of this validation. The intent is that
+# @VAR@ inside of makefile comments should not (necessarily) cause
+# validation to fail, as it's sometimes convenient to comment out
+# sections during development of a configure script and its
+# corresponding makefile(s).
+proc proj-validate-no-unresolved-ats {args} {
+  foreach f $args {
+    set lnno 1
+    set isMake [string match {*[Mm]ake*} $f]
+    foreach line [proj-file-content-list $f] {
+      if {!$isMake || ![string match "#*" [string trimleft $line]]} {
+        if {[regexp {(@[A-Za-z0-9_]+@)} $line match]} {
+          error "Unresolved reference to $match at line $lnno of $f"
+        }
+      }
+      incr lnno
+    }
+  }
+}
+
+########################################################################
+# @proj-first-found fileList tgtVar
+#
+# Searches $fileList for an existing file. If one is found, its name is
+# assigned to tgtVar and 1 is returned, else tgtVar is not modified
+# and 0 is returned.
+proc proj-first-file-found {fileList tgtVar} {
+  upvar $tgtVar tgt
+  foreach f $fileList {
+    if {[file exists $f]} {
+      set tgt $f
+      return 1
+    }
+  }
+  return 0
+}
+
+########################################################################
+# Defines $defName to contain makefile recipe commands for re-running
+# the configure script with its current set of $::argv flags.  This
+# can be used to automatically reconfigure.
+proc proj-setup-autoreconfig {defName} {
+  set squote {{arg} {
+    # Wrap $arg in single-quotes if it looks like it might need that
+    # to avoid mis-handling as a shell argument. We assume that $arg
+    # will never contain any single-quote characters.
+    if {[string match {*[ &;$*"]*} $arg]} { return '$arg' }
+    return $arg
+  }}
+  define-append $defName cd [apply $squote $::autosetup(builddir)] \
+    && [apply $squote $::autosetup(srcdir)/configure]
+  #{*}$::autosetup(argv) breaks with --flag='val with spaces', so...
+  foreach arg $::autosetup(argv) {
+    define-append $defName [apply $squote $arg]
+  }
 }

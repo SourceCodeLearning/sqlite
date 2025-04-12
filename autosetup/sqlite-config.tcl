@@ -63,14 +63,13 @@ array set sqliteConfig [subst [proj-strip-hash-comments {
 
   #
   # The list of feature --flags which the --all flag implies. This
-  # requires special handling in a few places and gets replaced with
-  # a different list in the tcl-extension build.
+  # requires special handling in a few places.
   #
   all-flag-enables {fts4 fts5 rtree geopoly session}
 
   #
-  # Default value for the --all flag. Gets changed for the
-  # tcl-extension build.
+  # Default value for the --all flag. Can hypothetically be modified
+  # by non-canonical builds.
   #
   all-flag-default 0
 }]]
@@ -97,7 +96,7 @@ array set sqliteConfig [subst [proj-strip-hash-comments {
 proc sqlite-configure {buildMode configScript} {
   proj-assert {$::sqliteConfig(build-mode) eq "unknown"} \
     "sqlite-configure must not be called more than once"
-  set allBuildModes {canonical autoconf tcl-extension}
+  set allBuildModes {canonical autoconf}
   if {$buildMode ni $allBuildModes} {
     user-error "Invalid build mode: $buildMode. Expecting one of: $allBuildModes"
   }
@@ -229,7 +228,7 @@ proc sqlite-configure {buildMode configScript} {
               copy of autosetup/jimsh0.c for that. The SQLite TCL extension and the
               test code require a canonical tclsh.}
       }
-      {canonical tcl-extension} {
+      {canonical} {
         with-tcl:DIR
           => {Directory containing tclConfig.sh or a directory one level up from
               that, from which we can derive a directory containing tclConfig.sh.
@@ -469,7 +468,7 @@ proc sqlite-configure-phase1 {buildMode} {
   }
   set ::sqliteConfig(msg-debug-enabled) [proj-val-truthy [get-env msg-debug 0]]
   proc-debug "msg-debug is enabled"
-  sqlite-autoreconfig
+  proj-setup-autoreconfig SQLITE_AUTORECONFIG
   proj-file-extensions
   if {".exe" eq [get-define TARGET_EXEEXT]} {
     define SQLITE_OS_UNIX 0
@@ -489,6 +488,11 @@ proc sqlite-configure-phase1 {buildMode} {
     # visible side-effects, though: the generated sqlite_cfg.h may (or
     # may not) define HAVE_LFS.
     cc-check-lfs
+  }
+  set srcdir $::autosetup(srcdir)
+  proj-dot-ins-append $srcdir/Makefile.in
+  if {[file exists $srcdir/sqlite3.pc.in]} {
+    proj-dot-ins-append $srcdir/sqlite3.pc.in
   }
 }; # sqlite-configure-phase1
 
@@ -539,28 +543,7 @@ proc msg-debug {msg} {
 # the debug message. It is not legal to call this from the global
 # scope.
 proc proc-debug {msg} {
-  msg-debug "\[[proj-current-proc-name 1]\]: $msg"
-}
-
-########################################################################
-# Sets up the SQLITE_AUTORECONFIG define.
-proc sqlite-autoreconfig {} {
-  # SQLITE_AUTORECONFIG contains make target rules for re-running the
-  # configure script with the same arguments it was initially invoked
-  # with. This can be used to automatically reconfigure.
-  set squote {{arg} {
-    # Wrap $arg in single-quotes if it looks like it might need that
-    # to avoid mis-handling as a shell argument. We assume that $arg
-    # will never contain any single-quote characters.
-    if {[string match {*[ &;$*"]*} $arg]} { return '$arg' }
-    return $arg
-  }}
-  define-append SQLITE_AUTORECONFIG cd [apply $squote $::autosetup(builddir)] \
-    && [apply $squote $::autosetup(srcdir)/configure]
-  #{*}$::autosetup(argv) breaks with --flag='val with spaces', so...
-  foreach arg $::autosetup(argv) {
-    define-append SQLITE_AUTORECONFIG [apply $squote $arg]
-  }
+  msg-debug "\[[proj-current-scope 1]\]: $msg"
 }
 
 define OPT_FEATURE_FLAGS {} ; # -DSQLITE_OMIT/ENABLE flags.
@@ -636,15 +619,21 @@ proc sqlite-check-common-system-deps {} {
   cc-check-functions gmtime_r isnan localtime_r localtime_s \
     malloc_usable_size strchrnul usleep utime pread pread64 pwrite pwrite64
 
-  set ldrt ""
-  # Collapse funcs from librt into LDFLAGS_RT.
-  # Some systems (ex: SunOS) require -lrt in order to use nanosleep
-  foreach func {fdatasync nanosleep} {
-    if {[proj-check-function-in-lib $func rt]} {
-      lappend ldrt [get-define lib_${func}]
+  apply {{} {
+    set ldrt ""
+    # Collapse funcs from librt into LDFLAGS_RT.
+    # Some systems (ex: SunOS) require -lrt in order to use nanosleep
+    foreach func {fdatasync nanosleep} {
+      if {[proj-check-function-in-lib $func rt]} {
+        set ldrt [get-define lib_${func} ""]
+        undefine lib_${func}
+        if {"" ne $ldrt} {
+          break
+        }
+      }
     }
-  }
-  define LDFLAGS_RT [join [lsort -unique $ldrt] ""]
+    define LDFLAGS_RT $ldrt
+  }}
 
   # Check for needed/wanted headers
   cc-check-includes \
@@ -1005,8 +994,10 @@ proc sqlite-handle-emsdk {} {
       # Maybe there's a copy in the path?
       proj-bin-define wasm-opt BIN_WASM_OPT
     }
-    proj-make-from-dot-in $emccSh $extWasmConfig
-    catch {exec chmod u+x $emccSh}
+    proj-dot-ins-append $emccSh.in $emccSh {
+      catch {exec chmod u+x $fileOut}
+    }
+    proj-dot-ins-append $extWasmConfig.in $extWasmConfig
   } else {
     define EMCC_WRAPPER ""
     file delete -force -- $emccSh $extWasmConfig
@@ -1725,15 +1716,7 @@ proc sqlite-process-dot-in-files {} {
   # (e.g. [proj-check-rpath]) may do so before we "mangle" them here.
   proj-remap-autoconf-dir-vars
 
-  set srcdir $::autosetup(srcdir)/
-  foreach f {Makefile sqlite3.pc} {
-    if {[file exists $srcdir/$f.in]} {
-      # ^^^ we do this only so that this block can be made to work for
-      # multiple builds. e.g. the tea build (under construction) does
-      # not hae sqlite3.pc.in.
-      proj-make-from-dot-in -touch $f
-    }
-  }
+  proj-dot-ins-process
   make-config-header sqlite_cfg.h \
     -bare {SIZEOF_* HAVE_DECL_*} \
     -none {HAVE_CFLAG_* LDFLAGS_* SH_* SQLITE_AUTORECONFIG
@@ -1755,17 +1738,10 @@ proc sqlite-post-config-validation {} {
   # contain any unresolved @VAR@ refs. That may indicate an
   # unexported/unused var or a typo.
   set srcdir $::autosetup(srcdir)
-  foreach f [list Makefile sqlite3.pc \
-             $srcdir/tool/emcc.sh \
-             $srcdir/ext/wasm/config.make] {
-    if {![file exists $f]} continue
-    set lnno 1
-    foreach line [proj-file-content-list $f] {
-      if {[regexp {(@[A-Za-z0-9_]+@)} $line match]} {
-        error "Unresolved reference to $match at line $lnno of $f"
-      }
-      incr lnno
-    }
+  foreach f [proj-dot-ins-list] {
+    proj-assert {3==[llength $f]} \
+      "Expecting proj-dot-ins-list to be stored in 3-entry lists"
+    proj-validate-no-unresolved-ats [lindex $f 1]
   }
 }
 

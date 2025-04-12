@@ -4858,7 +4858,8 @@ static void constInsert(
       return;  /* Already present.  Return without doing anything. */
     }
   }
-  if( sqlite3ExprAffinity(pColumn)==SQLITE_AFF_BLOB ){
+  assert( SQLITE_AFF_NONE<SQLITE_AFF_BLOB );
+  if( sqlite3ExprAffinity(pColumn)<=SQLITE_AFF_BLOB ){
     pConst->bHasAffBlob = 1;
   }
 
@@ -4933,7 +4934,8 @@ static int propagateConstantExprRewriteOne(
     if( pColumn==pExpr ) continue;
     if( pColumn->iTable!=pExpr->iTable ) continue;
     if( pColumn->iColumn!=pExpr->iColumn ) continue;
-    if( bIgnoreAffBlob && sqlite3ExprAffinity(pColumn)==SQLITE_AFF_BLOB ){
+    assert( SQLITE_AFF_NONE<SQLITE_AFF_BLOB );
+    if( bIgnoreAffBlob && sqlite3ExprAffinity(pColumn)<=SQLITE_AFF_BLOB ){
       break;
     }
     /* A match is found.  Add the EP_FixedCol property */
@@ -5586,7 +5588,7 @@ int sqlite3IndexedByLookup(Parse *pParse, SrcItem *pFrom){
 ** above that generates the code for a compound SELECT with an ORDER BY clause
 ** uses a merge algorithm that requires the same collating sequence on the
 ** result columns as on the ORDER BY clause.  See ticket
-** http://www.sqlite.org/src/info/6709574d2a
+** http://sqlite.org/src/info/6709574d2a
 **
 ** This transformation is only needed for EXCEPT, INTERSECT, and UNION.
 ** The UNION ALL operator works fine with multiSelectOrderBy() even when
