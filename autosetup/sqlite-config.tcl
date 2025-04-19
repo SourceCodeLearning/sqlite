@@ -425,19 +425,15 @@ proc sqlite-configure {buildMode configScript} {
   }
 
   # Filter allFlags to create the set of [options] legal for this build
-  set opts {}
-  foreach {group XY} [subst -nobackslashes -nocommands \
-                        [proj-strip-hash-comments $allFlags]] {
+  foreach {group XY} [subst -nobackslashes -nocommands $allFlags] {
     foreach {X Y} $XY {
       if { $buildMode in $X || "*" in $X } {
-        foreach y $Y {
-          lappend opts $y
-        }
+        options-add $Y
       }
     }
   }
   #lappend opts "soname:=duplicateEntry => {x}"; #just testing
-  if {[catch {options $opts} msg xopts]} {
+  if {[catch {options {}} msg xopts]} {
     # Workaround for <https://github.com/msteveb/autosetup/issues/73>
     # where [options] behaves oddly on _some_ TCL builds when it's
     # called from deeper than the global scope.
@@ -526,7 +522,6 @@ proc sqlite-configure-finalize {} {
   sqlite-handle-common-feature-flags
   sqlite-finalize-feature-flags
   sqlite-process-dot-in-files; # do not [define] anything after this
-  sqlite-post-config-validation
   sqlite-dump-defines
 }
 
@@ -586,8 +581,12 @@ proc sqlite-affirm-have-math {featureName} {
     if {![msg-quiet proj-check-function-in-lib log m]} {
       user-error "Missing math APIs for $featureName"
     }
-    define LDFLAGS_MATH [get-define lib_log ""]
+    set lfl [get-define lib_log ""]
     undefine lib_log
+    if {"" ne $lfl} {
+      user-notice "Forcing requirement of $lfl for $featureName"
+    }
+    define LDFLAGS_MATH $lfl
   }
 }
 
@@ -1716,7 +1715,7 @@ proc sqlite-process-dot-in-files {} {
   # (e.g. [proj-check-rpath]) may do so before we "mangle" them here.
   proj-remap-autoconf-dir-vars
 
-  proj-dot-ins-process
+  proj-dot-ins-process -validate
   make-config-header sqlite_cfg.h \
     -bare {SIZEOF_* HAVE_DECL_*} \
     -none {HAVE_CFLAG_* LDFLAGS_* SH_* SQLITE_AUTORECONFIG
@@ -1724,25 +1723,6 @@ proc sqlite-process-dot-in-files {} {
     -auto {HAVE_* PACKAGE_*} \
     -none *
   proj-touch sqlite_cfg.h ; # help avoid frequent unnecessary @SQLITE_AUTORECONFIG@
-}
-
-########################################################################
-# Perform some high-level validation on the generated files...
-#
-# 1) Ensure that no unresolved @VAR@ placeholders are in files which
-#    use those.
-#
-# 2) TBD
-proc sqlite-post-config-validation {} {
-  # Check #1: ensure that files which get filtered for @VAR@ do not
-  # contain any unresolved @VAR@ refs. That may indicate an
-  # unexported/unused var or a typo.
-  set srcdir $::autosetup(srcdir)
-  foreach f [proj-dot-ins-list] {
-    proj-assert {3==[llength $f]} \
-      "Expecting proj-dot-ins-list to be stored in 3-entry lists"
-    proj-validate-no-unresolved-ats [lindex $f 1]
-  }
 }
 
 ########################################################################
