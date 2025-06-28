@@ -3074,7 +3074,7 @@ int sqlite3BtreeSetPageSize(Btree *p, int pageSize, int nReserve, int iFix){
   sqlite3BtreeEnter(p);
   pBt->nReserveWanted = (u8)nReserve;
   x = pBt->pageSize - pBt->usableSize;
-  if( x==nReserve && (pageSize==0 || pageSize==pBt->pageSize) ){
+  if( x==nReserve && (pageSize==0 || (u32)pageSize==pBt->pageSize) ){
     sqlite3BtreeLeave(p);
     return SQLITE_OK;
   }
@@ -8696,7 +8696,12 @@ static int balance_nonroot(
   ** of the right-most new sibling page is set to the value that was
   ** originally in the same field of the right-most old sibling page. */
   if( (pageFlags & PTF_LEAF)==0 && nOld!=nNew ){
-    MemPage *pOld = (nNew>nOld ? apNew : apOld)[nOld-1];
+    MemPage *pOld;
+    if( nNew>nOld ){
+      pOld = apNew[nOld-1];
+    }else{
+      pOld = apOld[nOld-1];
+    }
     memcpy(&apNew[nNew-1]->aData[8], &pOld->aData[8], 4);
   }
 
