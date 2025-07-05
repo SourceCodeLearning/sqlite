@@ -2481,18 +2481,20 @@ static void fts5SegIterReverse(Fts5Index *p, Fts5SegIter *pIter){
     fts5DataRelease(pIter->pLeaf);
     pIter->pLeaf = pLast;
     pIter->iLeafPgno = pgnoLast;
-    iOff = fts5LeafFirstRowidOff(pLast);
-    if( iOff>pLast->szLeaf ){
-      FTS5_CORRUPT_ITER(p, pIter);
-      return;
-    }
-    iOff += fts5GetVarint(&pLast->p[iOff], (u64*)&pIter->iRowid);
-    pIter->iLeafOffset = iOff;
+    if( p->rc==SQLITE_OK ){
+      iOff = fts5LeafFirstRowidOff(pLast);
+      if( iOff>pLast->szLeaf ){
+        FTS5_CORRUPT_ITER(p, pIter);
+        return;
+      }
+      iOff += fts5GetVarint(&pLast->p[iOff], (u64*)&pIter->iRowid);
+      pIter->iLeafOffset = iOff;
 
-    if( fts5LeafIsTermless(pLast) ){
-      pIter->iEndofDoclist = pLast->nn+1;
-    }else{
-      pIter->iEndofDoclist = fts5LeafFirstTermOff(pLast);
+      if( fts5LeafIsTermless(pLast) ){
+        pIter->iEndofDoclist = pLast->nn+1;
+      }else{
+        pIter->iEndofDoclist = fts5LeafFirstTermOff(pLast);
+      }
     }
   }
 
@@ -5845,7 +5847,7 @@ static Fts5Structure *fts5IndexOptimizeStruct(
   }
 
   nByte += (((i64)pStruct->nLevel)+1) * sizeof(Fts5StructureLevel);
-  assert( nByte==SZ_FTS5STRUCTURE(pStruct->nLevel+2) );
+  assert( nByte==(i64)SZ_FTS5STRUCTURE(pStruct->nLevel+2) );
   pNew = (Fts5Structure*)sqlite3Fts5MallocZero(&p->rc, nByte);
 
   if( pNew ){
