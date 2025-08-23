@@ -443,8 +443,7 @@ void sqlite3SetJoinExpr(Expr *p, int iTable, u32 joinFlag){
     assert( !ExprHasProperty(p, EP_TokenOnly|EP_Reduced) );
     ExprSetVVAProperty(p, EP_NoReduce);
     p->w.iJoin = iTable;
-    if( p->op==TK_FUNCTION ){
-      assert( ExprUseXList(p) );
+    if( ExprUseXList(p) ){
       if( p->x.pList ){
         int i;
         for(i=0; i<p->x.pList->nExpr; i++){
@@ -3868,7 +3867,7 @@ static int multiSelectOrderBy(
 ** ## About "isOuterJoin":
 **
 ** The isOuterJoin column indicates that the replacement will occur into a
-** position in the parent that NULL-able due to an OUTER JOIN.  Either the
+** position in the parent that is NULL-able due to an OUTER JOIN.  Either the
 ** target slot in the parent is the right operand of a LEFT JOIN, or one of
 ** the left operands of a RIGHT JOIN.  In either case, we need to potentially
 ** bypass the substituted expression with OP_IfNullRow.
