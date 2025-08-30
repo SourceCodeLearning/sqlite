@@ -659,6 +659,7 @@ static int sqlite3ProcessJoin(Parse *pParse, Select *p){
       p->pWhere = sqlite3ExprAnd(pParse, p->pWhere, pRight->u3.pOn);
       pRight->u3.pOn = 0;
       pRight->fg.isOn = 1;
+      p->selFlags |= SF_OnToWhere;
     }
   }
   return 0;
@@ -4705,17 +4706,12 @@ static int flattenSubquery(
   pSub = pSub1;
   for(pParent=p; pParent; pParent=pParent->pPrior, pSub=pSub->pPrior){
     int nSubSrc;
-    u8 jointype = 0;
-    u8 ltorj = pSrc->a[iFrom].fg.jointype & JT_LTORJ;
+    u8 jointype = pSubitem->fg.jointype;
     assert( pSub!=0 );
     pSubSrc = pSub->pSrc;     /* FROM clause of subquery */
     nSubSrc = pSubSrc->nSrc;  /* Number of terms in subquery FROM clause */
     pSrc = pParent->pSrc;     /* FROM clause of the outer query */
 
-    if( pParent==p ){
-      jointype = pSubitem->fg.jointype;     /* First time through the loop */
-    }
-   
     /* The subquery uses a single slot of the FROM clause of the outer
     ** query.  If the subquery has more than one element in its FROM clause,
     ** then expand the outer query to make space for it to hold all elements
@@ -4735,6 +4731,7 @@ static int flattenSubquery(
       pSrc = sqlite3SrcListEnlarge(pParse, pSrc, nSubSrc-1,iFrom+1);
       if( pSrc==0 ) break;
       pParent->pSrc = pSrc;
+      pSubitem = &pSrc->a[iFrom];
     }
 
     /* Transfer the FROM clause terms from the subquery into the
@@ -4749,11 +4746,10 @@ static int flattenSubquery(
            || pItem->u4.zDatabase==0 );
       if( pItem->fg.isUsing ) sqlite3IdListDelete(db, pItem->u3.pUsing);
       *pItem = pSubSrc->a[i];
-      pItem->fg.jointype |= ltorj;
+      pItem->fg.jointype |= (jointype & JT_LTORJ);
       memset(&pSubSrc->a[i], 0, sizeof(pSubSrc->a[i]));
     }
-    pSrc->a[iFrom].fg.jointype &= JT_LTORJ;
-    pSrc->a[iFrom].fg.jointype |= jointype | ltorj;
+    pSubitem->fg.jointype |= jointype;
  
     /* Now begin substituting subquery result set expressions for
     ** references to the iParent in the outer query.
@@ -7495,6 +7491,115 @@ static SQLITE_NOINLINE void existsToJoin(
 }
 
 /*
+** Type used for Walker callbacks by selectCheckOnClauses().
+*/
+typedef struct CheckOnCtx CheckOnCtx;
+struct CheckOnCtx {
+  SrcList *pSrc;                  /* SrcList for this context */
+  int iJoin;                      /* Cursor numbers must be =< than this */
+  CheckOnCtx *pParent;            /* Parent context */
+};
+
+/*
+** True if the SrcList passed as the only argument contains at least
+** one RIGHT or FULL JOIN. False otherwise.  
+*/
+#define hasRightJoin(pSrc) (((pSrc)->a[0].fg.jointype & JT_LTORJ)!=0)
+
+/*
+** The xExpr callback for the search of invalid ON clause terms.
+*/
+static int selectCheckOnClausesExpr(Walker *pWalker, Expr *pExpr){
+  CheckOnCtx *pCtx = pWalker->u.pCheckOnCtx;
+
+  /* Check if pExpr is root or near-root of an ON clause constraint that needs
+  ** to be checked to ensure that it does not refer to tables in its FROM
+  ** clause to the right of itself. i.e. it is either:
+  **
+  **   + an ON clause on an OUTER join, or
+  **   + an ON clause on an INNER join within a FROM that features at
+  **     least one RIGHT or FULL join.
+  */
+  if( (ExprHasProperty(pExpr, EP_OuterON))
+   || (ExprHasProperty(pExpr, EP_InnerON) && hasRightJoin(pCtx->pSrc))
+  ){
+    /* If CheckOnCtx.iJoin is already set, then fall through and process
+    ** this expression node as normal. Or, if CheckOnCtx.iJoin is still 0,
+    ** set it to the cursor number of the RHS of the join to which this
+    ** ON expression was attached and then iterate through the entire 
+    ** expression.  */
+    assert( pCtx->iJoin==0 || pCtx->iJoin==pExpr->w.iJoin );
+    if( pCtx->iJoin==0 ){
+      pCtx->iJoin = pExpr->w.iJoin;
+      sqlite3WalkExprNN(pWalker, pExpr);
+      pCtx->iJoin = 0;
+      return WRC_Prune;
+    }
+  }
+
+  if( pExpr->op==TK_COLUMN ){
+    /* A column expression. Find the SrcList (if any) to which it refers.
+    ** Then, if CheckOnCtx.iJoin indicates that this expression is part of an
+    ** ON clause from that SrcList (i.e. if iJoin is non-zero), check that it
+    ** does not refer to a table to the right of CheckOnCtx.iJoin. */
+    do {
+      SrcList *pSrc = pCtx->pSrc;
+      int iTab = pExpr->iTable;
+      if( iTab>=pSrc->a[0].iCursor && iTab<=pSrc->a[pSrc->nSrc-1].iCursor ){
+        if( pCtx->iJoin && iTab>pCtx->iJoin ){
+          sqlite3ErrorMsg(pWalker->pParse, 
+              "ON clause references tables to its right");
+          return WRC_Abort;
+        }
+        break;
+      }
+      pCtx = pCtx->pParent;
+    }while( pCtx );
+  }
+  return WRC_Continue;
+}
+
+/*
+** The xSelect callback for the search of invalid ON clause terms.
+*/
+static int selectCheckOnClausesSelect(Walker *pWalker, Select *pSelect){
+  CheckOnCtx *pCtx = pWalker->u.pCheckOnCtx;
+  if( pSelect->pSrc==pCtx->pSrc || pSelect->pSrc->nSrc==0 ){
+    return WRC_Continue;
+  }else{
+    CheckOnCtx sCtx;
+    memset(&sCtx, 0, sizeof(sCtx));
+    sCtx.pSrc = pSelect->pSrc;
+    sCtx.pParent = pCtx;
+    pWalker->u.pCheckOnCtx = &sCtx;
+    sqlite3WalkSelect(pWalker, pSelect);
+    pWalker->u.pCheckOnCtx = pCtx;
+    pSelect->selFlags &= ~SF_OnToWhere;
+    return WRC_Prune;
+  }
+}
+
+/*
+** Check all ON clauses in pSelect to verify that they do not reference
+** columns to the right.
+*/
+static void selectCheckOnClauses(Parse *pParse, Select *pSelect){
+  Walker w;
+  CheckOnCtx sCtx;
+  assert( pSelect->selFlags & SF_OnToWhere );
+  assert( pSelect->pSrc!=0 && pSelect->pSrc->nSrc>=2 );
+  memset(&w, 0, sizeof(w));
+  w.pParse = pParse;
+  w.xExprCallback = selectCheckOnClausesExpr;
+  w.xSelectCallback = selectCheckOnClausesSelect;
+  w.u.pCheckOnCtx = &sCtx;
+  memset(&sCtx, 0, sizeof(sCtx));
+  sCtx.pSrc = pSelect->pSrc;
+  sqlite3WalkExprNN(&w, pSelect->pWhere);
+  pSelect->selFlags &= ~SF_OnToWhere;
+}
+
+/*
 ** Generate byte-code for the SELECT statement given in the p argument. 
 **
 ** The results are returned according to the SelectDest structure.
@@ -7620,6 +7725,18 @@ int sqlite3Select(
     sqlite3TreeViewSelect(0, p, 0);
   }
 #endif
+
+  /* If the SELECT statement contains ON clauses that were moved into
+  ** the WHERE clause, go through and verify that none of the terms
+  ** in the ON clauses reference tables to the right of the ON clause.
+  ** Do this now, after name resolution, but before query flattening
+  */
+  if( p->selFlags & SF_OnToWhere ){
+    selectCheckOnClauses(pParse, p);
+    if( pParse->nErr ){
+      goto select_end;
+    }
+  }
 
   /* If the SF_UFSrcCheck flag is set, then this function is being called
   ** as part of populating the temp table for an UPDATE...FROM statement.
