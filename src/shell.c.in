@@ -838,14 +838,24 @@ static int isVt100(const unsigned char *z){
 ** Take into account zero-width and double-width Unicode characters.
 ** In other words, a zero-width character does not count toward the
 ** the w limit.  A double-width character counts as two.
+**
+** w should normally be a small number.  A couple hundred at most.  This
+** routine caps w at 100 million to avoid integer overflow issues.
 */
 static void utf8_width_print(FILE *out, int w, const char *zUtf){
   const unsigned char *a = (const unsigned char*)zUtf;
+  static const int mxW = 10000000;
   unsigned char c;
   int i = 0;
   int n = 0;
   int k;
-  int aw = w<0 ? -w : w;
+  int aw;
+  if( w<-mxW ){
+    w = -mxW;
+  }else if( w>mxW ){
+    w= mxW;
+  }
+  aw = w<0 ? -w : w;
   if( zUtf==0 ) zUtf = "";
   while( (c = a[i])!=0 ){
     if( (c&0xc0)==0xc0 ){
@@ -1070,10 +1080,14 @@ static int hexDigitValue(char c){
 
 /*
 ** Interpret zArg as an integer value, possibly with suffixes.
+**
+** If the value specified by zArg is outside the range of values that
+** can be represented using a 64-bit twos-complement integer, then return
+** the nearest representable value.
 */
 static sqlite3_int64 integerValue(const char *zArg){
-  sqlite3_int64 v = 0;
-  static const struct { char *zSuffix; int iMult; } aMult[] = {
+  sqlite3_uint64 v = 0;
+  static const struct { char *zSuffix; unsigned int iMult; } aMult[] = {
     { "KiB", 1024 },
     { "MiB", 1024*1024 },
     { "GiB", 1024*1024*1024 },
@@ -1096,22 +1110,30 @@ static sqlite3_int64 integerValue(const char *zArg){
     int x;
     zArg += 2;
     while( (x = hexDigitValue(zArg[0]))>=0 ){
+      if( v > 0x0fffffffffffffffULL ) goto integer_overflow;
       v = (v<<4) + x;
       zArg++;
     }
   }else{
     while( IsDigit(zArg[0]) ){
-      v = v*10 + zArg[0] - '0';
+      if( v>=922337203685477580 ){
+        if( v>922337203685477580 || zArg[0]>='8' ) goto integer_overflow;
+      }
+      v = v*10 + (zArg[0] - '0');
       zArg++;
     }
   }
   for(i=0; i<ArraySize(aMult); i++){
     if( sqlite3_stricmp(aMult[i].zSuffix, zArg)==0 ){
+      if( 0x7fffffffffffffffULL/aMult[i].iMult < v ) goto integer_overflow;
       v *= aMult[i].iMult;
       break;
     }
   }
-  return isNeg? -v : v;
+  if( isNeg && v>0x7fffffffffffffffULL ) goto integer_overflow;
+  return isNeg? -(sqlite3_int64)v : (sqlite3_int64)v;
+integer_overflow:
+  return isNeg ? 0x8000000000000000LL : 0x7fffffffffffffffLL;
 }
 
 /*
@@ -6876,7 +6898,7 @@ static int shell_dbtotxt_command(ShellState *p, int nArg, char **azArg){
   sqlite3_finalize(pStmt);
   pStmt = 0;
   if( nPage<1 ) goto dbtotxt_error;
-  rc = sqlite3_prepare_v2(p->db, "PRAGMA databases", -1, &pStmt, 0);
+  rc = sqlite3_prepare_v2(p->db, "PRAGMA database_list", -1, &pStmt, 0);
   if( rc ) goto dbtotxt_error;
   if( sqlite3_step(pStmt)!=SQLITE_ROW ){
     zTail = "unk.db";
@@ -6887,6 +6909,7 @@ static int shell_dbtotxt_command(ShellState *p, int nArg, char **azArg){
 #if defined(_WIN32)
     if( zTail==0 ) zTail = strrchr(zFilename, '\\');
 #endif
+    if( zTail && zTail[1]!=0 ) zTail++;
   }
   zName = strdup(zTail);
   shell_check_oom(zName);
@@ -9747,12 +9770,6 @@ static int do_meta_command(char *zLine, ShellState *p){
     int isWO = 0;  /* True if making an imposter of a WITHOUT ROWID table */
     int lenPK = 0; /* Length of the PRIMARY KEY string for isWO tables */
     int i;
-    if( !ShellHasFlag(p,SHFLG_TestingMode) ){
-      sqlite3_fprintf(stderr,".%s unavailable without --unsafe-testing\n",
-            "imposter");
-      rc = 1;
-      goto meta_command_exit;
-    }
     if( !(nArg==3 || (nArg==2 && sqlite3_stricmp(azArg[1],"off")==0)) ){
       eputz("Usage: .imposter INDEX IMPOSTER\n"
             "       .imposter off\n");
@@ -9833,9 +9850,6 @@ static int do_meta_command(char *zLine, ShellState *p){
               "Error in [%s]: %s\n", zSql, sqlite3_errmsg(p->db));
       }else{
         sqlite3_fprintf(stdout, "%s;\n", zSql);
-        sqlite3_fprintf(stdout,
-              "WARNING: writing to an imposter table will corrupt"
-              " the \"%s\" %s!\n", azArg[1], isWO ? "table" : "index");
       }
     }else{
       sqlite3_fprintf(stderr,"SQLITE_TESTCTRL_IMPOSTER returns %d\n", rc);
@@ -11725,7 +11739,7 @@ static int do_meta_command(char *zLine, ShellState *p){
             { 0x00000080, 1, "Transitive" },
             { 0x00000100, 1, "OmitNoopJoin" },
             { 0x00000200, 1, "CountOfView" },
-            { 0x00000400, 1, "CurosrHints" },
+            { 0x00000400, 1, "CursorHints" },
             { 0x00000800, 1, "Stat4" },
             { 0x00001000, 1, "PushDown" },
             { 0x00002000, 1, "SimplifyJoin" },
