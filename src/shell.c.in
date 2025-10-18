@@ -3418,8 +3418,8 @@ static int display_stats(
   ShellState *pArg,           /* Pointer to ShellState */
   int bReset                  /* True to reset the stats */
 ){
-  int iCur;
-  int iHiwtr;
+  int iCur, iHiwtr;
+  sqlite3_int64 iCur64, iHiwtr64;
   FILE *out;
   if( pArg==0 || pArg->out==0 ) return 0;
   out = pArg->out;
@@ -3508,6 +3508,9 @@ static int display_stats(
     sqlite3_db_status(db, SQLITE_DBSTATUS_CACHE_MISS, &iCur, &iHiwtr, 1);
     sqlite3_fprintf(out,
            "Page cache misses:                   %d\n", iCur);
+    iHiwtr64 = iCur64 = -1;
+    sqlite3_db_status64(db, SQLITE_DBSTATUS_TEMPBUF_SPILL, &iCur64, &iHiwtr64,
+                        0);
     iHiwtr = iCur = -1;
     sqlite3_db_status(db, SQLITE_DBSTATUS_CACHE_WRITE, &iCur, &iHiwtr, 1);
     sqlite3_fprintf(out,
@@ -3516,6 +3519,10 @@ static int display_stats(
     sqlite3_db_status(db, SQLITE_DBSTATUS_CACHE_SPILL, &iCur, &iHiwtr, 1);
     sqlite3_fprintf(out,
            "Page cache spills:                   %d\n", iCur);
+    sqlite3_fprintf(out,
+           "Temporary data spilled to disk:      %lld\n", iCur64);
+    sqlite3_db_status64(db, SQLITE_DBSTATUS_TEMPBUF_SPILL, &iCur64, &iHiwtr64,
+                        1);
     iHiwtr = iCur = -1;
     sqlite3_db_status(db, SQLITE_DBSTATUS_SCHEMA_USED, &iCur, &iHiwtr, bReset);
     sqlite3_fprintf(out,
@@ -5224,7 +5231,7 @@ static const char *(azHelp[]) = {
   "        input text.",
 #endif
 #ifndef SQLITE_OMIT_TEST_CONTROL
-  ",imposter INDEX TABLE    Create imposter table TABLE on index INDEX",
+  ".imposter INDEX TABLE    Create imposter table TABLE on index INDEX",
 #endif
   ".indexes ?TABLE?         Show names of indexes",
   "                           If TABLE is specified, only show indexes for",
@@ -7866,25 +7873,41 @@ static void arWhereClause(
   char **pzWhere                  /* OUT: New WHERE clause */
 ){
   char *zWhere = 0;
-  const char *zSameOp = (pAr->bGlob)? "GLOB" : "=";
   if( *pRc==SQLITE_OK ){
     if( pAr->nArg==0 ){
       zWhere = sqlite3_mprintf("1");
     }else{
+      char *z1 = sqlite3_mprintf(pAr->bGlob ? "" : "name IN(");
+      char *z2 = sqlite3_mprintf("");
+      const char *zSep1 = "";
+      const char *zSep2 = "";
+
       int i;
-      const char *zSep = "";
-      for(i=0; i<pAr->nArg; i++){
+      for(i=0; i<pAr->nArg && z1 && z2; i++){
         const char *z = pAr->azArg[i];
-        zWhere = sqlite3_mprintf(
-          "%z%s name %s '%q' OR substr(name,1,%d) %s '%q/'",
-          zWhere, zSep, zSameOp, z, strlen30(z)+1, zSameOp, z
-        );
-        if( zWhere==0 ){
-          *pRc = SQLITE_NOMEM;
-          break;
+        int n = strlen30(z);
+
+        if( pAr->bGlob ){
+          z1 = sqlite3_mprintf("%z%sname GLOB '%q'", z1, zSep2, z);
+          z2 = sqlite3_mprintf(
+              "%z%ssubstr(name,1,%d) GLOB '%q/'", z2, zSep2, n+1,z
+          );
+        }else{
+          z1 = sqlite3_mprintf("%z%s'%q'", z1, zSep1, z);
+          z2 = sqlite3_mprintf("%z%ssubstr(name,1,%d) = '%q/'",z2,zSep2,n+1,z);
         }
-        zSep = " OR ";
+        zSep1 = ", ";
+        zSep2 = " OR ";
       }
+      if( z1==0 || z2==0 ){
+        *pRc = SQLITE_NOMEM;
+      }else{
+        zWhere = sqlite3_mprintf("(%s%s OR (name GLOB '*/*' AND (%s))) ",
+            z1, pAr->bGlob==0 ? ")" : "", z2
+        );
+      }
+      sqlite3_free(z1);
+      sqlite3_free(z2);
     }
   }
   *pzWhere = zWhere;
@@ -10424,6 +10447,7 @@ static int do_meta_command(char *zLine, ShellState *p){
                           "ERROR: unknown option: \"%s\". Usage:\n", azArg[i]);
           showHelp(p->out, azArg[0]);
           rc = 1;
+          sqlite3_free(zFile);
           goto meta_command_exit;
         }
       }else if( zFile==0 && eMode==0 ){
@@ -11664,10 +11688,10 @@ static int do_meta_command(char *zLine, ShellState *p){
     while( sqlite3_step(pStmt)==SQLITE_ROW ){
       if( nRow>=nAlloc ){
         char **azNew;
-        int n2 = nAlloc*2 + 10;
+        sqlite3_int64 n2 = 2*(sqlite3_int64)nAlloc + 10;
         azNew = sqlite3_realloc64(azResult, sizeof(azResult[0])*n2);
         shell_check_oom(azNew);
-        nAlloc = n2;
+        nAlloc = (int)n2;
         azResult = azNew;
       }
       azResult[nRow] = sqlite3_mprintf("%s", sqlite3_column_text(pStmt, 0));
