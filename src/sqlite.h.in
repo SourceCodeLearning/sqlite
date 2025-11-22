@@ -4339,6 +4339,10 @@ int sqlite3_limit(sqlite3*, int id, int newVal);
 ** [[SQLITE_LIMIT_EXPR_DEPTH]] ^(<dt>SQLITE_LIMIT_EXPR_DEPTH</dt>
 ** <dd>The maximum depth of the parse tree on any expression.</dd>)^
 **
+** [[SQLITE_LIMIT_PARSER_DEPTH]] ^(<dt>SQLITE_LIMIT_PARSER_DEPTH</dt>
+** <dd>The maximum depth of the LALR(1) parser stack used to analyze
+** input SQL statements.</dd>)^
+**
 ** [[SQLITE_LIMIT_COMPOUND_SELECT]] ^(<dt>SQLITE_LIMIT_COMPOUND_SELECT</dt>
 ** <dd>The maximum number of terms in a compound SELECT statement.</dd>)^
 **
@@ -4383,6 +4387,7 @@ int sqlite3_limit(sqlite3*, int id, int newVal);
 #define SQLITE_LIMIT_VARIABLE_NUMBER           9
 #define SQLITE_LIMIT_TRIGGER_DEPTH            10
 #define SQLITE_LIMIT_WORKER_THREADS           11
+#define SQLITE_LIMIT_PARSER_DEPTH             12
 
 /*
 ** CAPI3REF: Prepare Flags
@@ -8730,7 +8735,7 @@ sqlite3_str *sqlite3_str_new(sqlite3*);
 **
 ** ^The [sqlite3_str_free(X)] interface destroys both the sqlite3_str object
 ** X and the string content it contains.  Calling sqlite3_str_free(X) is
-** the equivalent of calling [sqlite3_free](sqlite3_str_finalize(X)).
+** the equivalent of calling [sqlite3_free](sqlite3_str_finish(X)).
 */
 char *sqlite3_str_finish(sqlite3_str*);
 void sqlite3_str_free(sqlite3_str*);

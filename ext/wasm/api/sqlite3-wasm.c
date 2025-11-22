@@ -94,6 +94,18 @@
 #define SQLITE_ENABLE_API_ARMOR 1
 
 /**********************************************************************/
+/* SQLITE_EXPERIMENTAL_PRAGMA_20251114 */
+/*
+** See:
+** https://sqlite.org/src/info/e2b3f1a9480a9be3
+** https://github.com/rhashimoto/wa-sqlite/discussions/301
+**
+** It is enabled here for the sake of VFS experimentors.
+*/
+#undef SQLITE_EXPERIMENTAL_PRAGMA_20251114
+#define SQLITE_EXPERIMENTAL_PRAGMA_20251114
+
+/**********************************************************************/
 /* SQLITE_O... */
 #undef SQLITE_OMIT_DEPRECATED
 #define SQLITE_OMIT_DEPRECATED 1
@@ -136,8 +148,8 @@
 /*
 ** If SQLITE_WASM_BARE_BONES is defined, undefine most of the ENABLE
 ** macros. This will, when using the canonical makefile, also elide
-** any C functions from the WASM exports which are listed in
-** ./EXPORT_FUNCTIONS.sqlite3-extras.
+** any C functions from the WASM exports: see
+** ./EXPORTED_FUNCTIONS.c-pp.
 */
 #ifdef SQLITE_WASM_BARE_BONES
 #  undef  SQLITE_ENABLE_COLUMN_METADATA
