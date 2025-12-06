@@ -428,7 +428,7 @@ static const struct {
   {1, 0x00f7f},  {0, 0x00f80},  {1, 0x00f85},  {0, 0x00f86},  {1, 0x00f88},
   {0, 0x00f90},  {1, 0x00f98},  {0, 0x00f99},  {1, 0x00fbd},  {0, 0x00fc6},
   {1, 0x00fc7},  {0, 0x0102d},  {1, 0x01031},  {0, 0x01032},  {1, 0x01033},
-  {0, 0x01036},  {1, 0x01038},  {0, 0x01039},  {1, 0x0103a},  {0, 0x01058},
+  {0, 0x01036},  {1, 0x0103b},  {0, 0x01058},
   {1, 0x0105a},  {2, 0x01100},  {0, 0x01160},  {1, 0x01200},  {0, 0x0135f},
   {1, 0x01360},  {0, 0x01712},  {1, 0x01715},  {0, 0x01732},  {1, 0x01735},
   {0, 0x01752},  {1, 0x01754},  {0, 0x01772},  {1, 0x01774},  {0, 0x017b4},
@@ -471,7 +471,7 @@ int sqlite3_qrf_wcwidth(int c){
   int iFirst, iLast;
 
   /* Fast path for common characters */
-  if( c<=0x300 ) return 1;
+  if( c<0x300 ) return 1;
 
   /* The general case */
   iFirst = 0;
@@ -537,13 +537,20 @@ static int qrfIsVt100(const unsigned char *z){
 
 /*
 ** Return the length of a string in display characters.
-** Multibyte UTF8 characters count as a single character
-** for single-width characters, or as two characters for
-** double-width characters.
+**
+** Most characters of the input string count as 1, including
+** multi-byte UTF8 characters.  However, zero-width unicode
+** characters and VT100 escape sequences count as zero, and
+** double-width characters count as two.
+**
+** The definition of "zero-width" and "double-width" characters
+** is not precise.  It depends on the output device, to some extent,
+** and it varies according to the Unicode version.  This routine
+** makes the best guess that it can.
 */
-static int qrfDisplayLength(const char *zIn){
+size_t sqlite3_qrf_wcswidth(const char *zIn){
   const unsigned char *z = (const unsigned char*)zIn;
-  int n = 0;
+  size_t n = 0;
   while( *z ){
     if( z[0]<' ' ){
       int k;
@@ -577,11 +584,14 @@ static int qrfDisplayLength(const char *zIn){
 ** it will need to be split.
 */
 static int qrfDisplayWidth(const char *zIn, sqlite3_int64 nByte, int *pnNL){
-  const unsigned char *z = (const unsigned char*)zIn;
-  const unsigned char *zEnd = &z[nByte];
+  const unsigned char *z;
+  const unsigned char *zEnd;
   int mx = 0;
   int n = 0;
   int nNL = 0;
+  if( zIn==0 ) zIn = "";
+  z = (const unsigned char*)zIn;
+  zEnd = &z[nByte];
   while( z<zEnd ){
     if( z[0]<' ' ){
       int k;
@@ -1934,6 +1944,7 @@ static void qrfColumnar(Qrf *p){
     */
     for(j=0; j<nColumn; j++){
       data.a[j].z = data.az[i+j];
+      if( data.a[j].z==0 ) data.a[j].z = "";
       data.a[j].bNum = data.abNum[i+j];
     }
     do{
@@ -2194,7 +2205,7 @@ static void qrfExplain(Qrf *p){
         int len;
         if( i==nArg-1 ) w = 0;
         if( zVal==0 ) zVal = "";
-        len = qrfDisplayLength(zVal);
+        len = (int)sqlite3_qrf_wcswidth(zVal);
         if( len>w ){
           w = len;
           zSep = " ";
@@ -2384,7 +2395,7 @@ static void qrfOneSimpleRow(Qrf *p){
           int sz;
           p->u.sLine.azCol[i] = sqlite3_column_name(p->pStmt, i);
           if( p->u.sLine.azCol[i]==0 ) p->u.sLine.azCol[i] = "unknown";
-          sz = qrfDisplayLength(p->u.sLine.azCol[i]);
+          sz = (int)sqlite3_qrf_wcswidth(p->u.sLine.azCol[i]);
           if( sz > p->u.sLine.mxColWth ) p->u.sLine.mxColWth = sz;
         }
       }
